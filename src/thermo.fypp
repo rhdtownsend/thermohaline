@@ -1,0 +1,370 @@
+#:include 'forum.inc'
+
+program thermo
+
+   ! Uses
+
+   use forum_m
+   use params_m
+   use matrix_m
+   use finger_m
+
+   use f95_lapack
+
+   use ISO_FORTRAN_ENV
+
+   ! No implicit typing
+
+   implicit none
+
+   ! Variables
+
+   character(:), allocatable :: nml_file
+
+   integer                  :: unit
+   real(RD)                 :: k_z_min
+   real(RD)                 :: k_z_max
+   integer                  :: n_k_z
+   logical                  :: log_k_z
+   logical                  :: rescale_k_z_min
+   logical                  :: rescale_k_z_max
+   real(RD)                 :: R0
+   real(RD)                 :: Pr
+   real(RD)                 :: tau
+   real(RD)                 :: H_B
+   real(RD)                 :: D_B
+   real(RD)                 :: w_f
+   integer                  :: N
+   character(256)           :: out_file
+   real(RD)                 :: lam_f
+   real(RD)                 :: l_f
+   real(RD), allocatable    :: k_z(:)
+   type(params_t)           :: pa
+   integer                  :: i
+   complex(RD), allocatable :: sig2(:,:)
+   complex(RD), allocatable :: sig2_max(:)
+   type(hdf5io_t)           :: hi
+
+   namelist /params/ &
+      k_z_min, k_z_max, n_k_z, log_k_z, rescale_k_z_min, rescale_k_z_max, &
+      R0, Pr, tau, H_B, D_B, w_f, &
+      N, &
+      out_file
+
+   ! Read arguments
+
+   @:ASSERT(n_arg() == 1,'Syntax: thermo nml_file')
+
+   call get_arg(1, nml_file)
+
+   ! Read namelist parameters
+
+   k_z_min = 1e-1
+   k_z_max = 1.
+   log_k_z = .FALSE.
+   rescale_k_z_min = .FALSE.
+   rescale_k_z_max = .FALSE.
+
+   R0 = 1.
+   Pr = 1.
+   tau = 1.
+   Pr = 1.
+   
+   H_B = 1.
+   D_B = 1.
+   w_f = 1.
+
+   open(NEWUNIT=unit, STATUS='OLD', FILE=nml_file)
+   read(unit, NML=params)
+   close(unit)
+
+   print *,'R0  :', R0
+   print *,'Pr  :', Pr
+   print *,'tau :', tau
+   print *,'H_B :', H_B
+   print *,'D_B :', D_B
+   print *,'w_f :', w_f
+
+   ! If necessary, rescale k_z range
+
+   call solve_finger(R0, Pr, tau, lam_f, l_f)
+
+   if (rescale_k_z_min) k_z_min = k_z_min*l_f
+   if (rescale_k_z_max) k_z_max = k_z_max*l_f
+      
+   ! Loop over k_z
+
+   allocate(k_z(n_k_z))
+
+   allocate(sig2(4*(2*N+1), n_k_z))
+   allocate(sig2_max(n_k_z))
+
+   !$OMP PARALLEL DO PRIVATE(pa)
+   do i = 1, n_k_z
+
+      ! Set up parameters
+ 
+      if (log_k_z) then
+         k_z(i) = 10**((LOG10(k_z_min)*(n_k_z-i) + LOG10(k_z_max)*(i-1))/(n_k_z - 1))
+      else
+         k_z(i) = (k_z_min*(n_k_z-i) + k_z_max*(i-1))/(n_k_z - 1)
+      endif
+
+      pa = params_t(R0, Pr, tau, H_B, D_B, w_f, k_z(i))
+
+      ! Evaluate the full set of eigenvalues
+
+      call eigen_all(N, pa, sig2(:,i))
+
+      ! Evaluate the eigenvalue with largest real part
+
+      !call eigen_max(N, pa, sig2_max(i))
+
+   end do
+
+   ! Write out results
+
+   hi = hdf5io_t(out_file, CREATE_FILE)
+
+   call hi%write_attr('lam_f', lam_f)
+   call hi%write_attr('l_f', l_f)
+
+   call hi%write_dset('k_z', k_z)
+   call hi%write_dset('sig2', sig2)
+
+   call hi%final()
+
+   ! Finished
+
+contains
+
+   subroutine eigen_all(N, pa, sig2)
+
+      integer, intent(in)        :: N
+      type(params_t), intent(in) :: pa
+      complex(RD), intent(out)   :: sig2(:)
+
+      real(RD) :: A(4*(2*N+1),4*(2*N+1))
+      real(RD) :: wr(4*(2*N+1))
+      real(RD) :: wi(4*(2*N+1))
+
+      ! Set up the matrix
+
+      call eval_A(N, pa, A)
+
+      ! Diagonalize it
+
+      call LA_GEEV(A, wr, wi)
+
+      ! Return the eigenvalues
+
+      sig2 = CMPLX(wr, wi, KIND=RD)
+
+   end subroutine eigen_all
+
+   ! !****
+
+   ! subroutine eigen_max(N, pa, sig2_max)
+
+   !    integer, intent(in)        :: N
+   !    type(params_t), intent(in) :: pa
+   !    complex(RD), intent(out)   :: sig2_max
+
+   !    integer, parameter  :: NEV = 1
+   !    integer, parameter  :: NCV = 2*NEV + 1
+   !    integer, parameter  :: LWORKL = 3*NCV**2 + 6*NCV
+   !    real(RD), parameter :: TOL = 1E-6_RD
+
+   !    integer  :: ido
+   !    integer  :: iparam(11)
+   !    integer  :: ipntr(14)
+   !    real(RD) :: resid(4*(2*N+1))
+   !    real(RD) :: v(4*(2*N+1),NCV)
+   !    real(RD) :: workd(3*4*(2*N+1))
+   !    real(RD) :: workl(LWORKL)
+   !    integer  :: info
+   !    real(RD) :: dr(NEV+1)
+   !    real(RD) :: di(NEV+1)
+   !    real(RD) :: z(4*(2*N+1),NEV+1)
+   !    real(RD) :: workev(3*NCV)
+   !    logical  :: select(NCV)
+   !    integer  :: ierr
+
+   !    ! Find the maximal eigenvalue
+
+   !    ! First set up parameters
+
+   !    iparam = 0
+
+   !    iparam(1) = 1
+   !    iparam(3) = 300
+   !    iparam(7) = 1
+
+   !    ido = 0
+   !    info = 0
+
+   !    iter_loop : do
+
+   !       call DNAUPD(ido, 'I', 4*(2*N+1), 'LR', NEV, TOL, resid, &
+   !          NCV, v, SIZE(v, 1), iparam, ipntr, workd, workl, LWORKL, &
+   !          info)
+
+   !       if (ido == -1 .OR. ido == 1) then
+
+   !          associate( &
+   !             x => workd(ipntr(1):ipntr(1)+4*(2*N+1)-1), &
+   !             y => workd(ipntr(2):ipntr(2)+4*(2*N+1)-1))
+
+   !             call eval_prod(N, pa, x, y)
+
+   !          end associate
+
+   !       else
+
+   !          exit iter_loop
+
+   !       end if
+
+   !    end do iter_loop
+
+   !    ! Check for convergence
+
+   !    if (info < 0) then
+
+   !       print *, ' '
+   !       print *, ' Error with _naupd, info = ', info
+   !       print *, ' Check the documentation of _naupd'
+   !       print *, ' '
+   !       stop
+
+   !    else
+
+   !       call DNEUPD(.FALSE., 'A', select, dr, di, z, SIZE(z, 1), &
+   !          0._RD, 0._RD, workev, 'I', 4*(2*N+1), 'LR', NEV, TOL, &
+   !          resid, NCV, v, SIZE(v, 1), iparam, ipntr, workd, workl, &
+   !          LWORKL, ierr)
+
+   !       if (ierr /= 0) then
+
+   !          print *, ' '
+   !          print *, ' Error with _neupd, info = ', ierr
+   !          print *, ' Check the documentation of _neupd. '
+   !          print *, ' '
+   !          stop
+
+   !       end if
+         
+   !    endif
+
+   !    ! Store the eigenvalue
+
+   !    sig2_max = CMPLX(dr(1), di(1), KIND=RD)
+
+   !    print *,sig2_max
+
+   ! end subroutine eigen_max
+
+   ! !****
+
+   ! subroutine eigen_close(N, pa, sig2_shift, sig2_close)
+      
+   !    integer, intent(in)        :: N
+   !    type(params_t), intent(in) :: pa
+   !    complex(RD), intent(in)    :: sig2_shift
+   !    complex(RD), intent(out)   :: sig2_close
+
+   !    integer, parameter  :: NEV = 1
+   !    integer, parameter  :: NCV = 2*NEV + 1
+   !    integer, parameter  :: LWORKL = 3*NCV**2 + 6*NCV
+   !    real(RD), parameter :: TOL = 1E-6_RD
+
+   !    integer  :: ido
+   !    integer  :: iparam(11)
+   !    integer  :: ipntr(14)
+   !    real(RD) :: resid(4*(2*N+1))
+   !    real(RD) :: v(4*(2*N+1),NCV)
+   !    real(RD) :: workd(3*4*(2*N+1))
+   !    real(RD) :: workl(LWORKL)
+   !    integer  :: info
+   !    real(RD) :: dr(NEV+1)
+   !    real(RD) :: di(NEV+1)
+   !    real(RD) :: z(4*(2*N+1),NEV+1)
+   !    real(RD) :: workev(3*NCV)
+   !    logical  :: select(NCV)
+   !    integer  :: ierr
+
+   !    ! Find the maximal eigenvalue
+
+   !    ! First set up parameters
+
+   !    iparam = 0
+
+   !    iparam(1) = 1
+   !    iparam(3) = 300
+   !    iparam(7) = 1
+
+   !    ido = 0
+   !    info = 0
+
+   !    iter_loop : do
+
+   !       call DNAUPD(ido, 'I', 4*(2*N+1), 'SR', NEV, TOL, resid, &
+   !          NCV, v, SIZE(v, 1), iparam, ipntr, workd, workl, LWORKL, &
+   !          info)
+
+   !       if (ido == -1 .OR. ido == 1) then
+
+   !          associate( &
+   !             x => workd(ipntr(1):ipntr(1)+4*(2*N+1)-1), &
+   !             y => workd(ipntr(2):ipntr(2)+4*(2*N+1)-1))
+
+   !             call eval_prod(N, pa, x, y)
+
+   !          end associate
+
+   !       else
+
+   !          exit iter_loop
+
+   !       end if
+
+   !    end do iter_loop
+
+   !    ! Check for convergence
+
+   !    if (info < 0) then
+
+   !       print *, ' '
+   !       print *, ' Error with _naupd, info = ', info
+   !       print *, ' Check the documentation of _naupd'
+   !       print *, ' '
+   !       stop
+
+   !    else
+
+   !       call DNEUPD(.FALSE., 'A', select, dr, di, z, SIZE(z, 1), &
+   !          0._RD, 0._RD, workev, 'I', 4*(2*N+1), 'LM', NEV, TOL, &
+   !          resid, NCV, v, SIZE(v, 1), iparam, ipntr, workd, workl, &
+   !          LWORKL, ierr)
+
+   !       if (ierr /= 0) then
+
+   !          print *, ' '
+   !          print *, ' Error with _neupd, info = ', ierr
+   !          print *, ' Check the documentation of _neupd. '
+   !          print *, ' '
+   !          stop
+
+   !       end if
+         
+   !    endif
+
+   !    ! Store the eigenvalue
+
+   !    sig2_close = CMPLX(dr(1), di(1), KIND=RD)
+
+   !    print *,sig2_close
+
+   ! end subroutine eigen_close
+
+end program thermo

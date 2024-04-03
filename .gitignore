@@ -1,0 +1,15 @@
+# .gitignore file for thermohaline
+
+*~
+*.o
+*.mod
+
+bin
+lib
+include
+
+.DS_Store
+__pycache__
+.ipynb_checkpoints
+.jupyter_ystore.db
+

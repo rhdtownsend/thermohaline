@@ -1,0 +1,16 @@
+&params
+  k_z_min = 1e-6
+  k_z_max = 1.0
+  n_k_z = 2500
+  log_k_z = .true.
+  rescale_k_z_min = .true.
+  rescale_k_z_max = .true.
+  N = 10
+  R0 = 8e6
+  Pr = 1e-6
+  tau = 1e-7
+  w_f = 0.0003806622073821217
+  H_B = 1e-7
+  D_B = 1e-5
+  out_file = 'thermo.h5'
+/  

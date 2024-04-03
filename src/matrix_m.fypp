@@ -1,0 +1,279 @@
+#:include 'forum.inc'
+
+module matrix_m
+
+   ! Uses
+
+   use forum_m
+   use params_m
+
+   use ISO_FORTRAN_ENV
+
+   ! No implicit typing
+
+   implicit none
+
+   ! Access specifiers
+
+   private
+
+   public :: eval_D
+   public :: eval_U
+   public :: eval_L
+   public :: eval_A
+   public :: eval_prod
+
+contains
+
+   subroutine eval_D(N, m, pa, D)
+
+      integer, intent(in)        :: N
+      integer, intent(in)        :: m
+      type(params_t), intent(in) :: pa
+      real(RD), intent(out)      :: D(:,:)
+
+      real(RD) :: k2_m
+
+      @:CHECK_BOUNDS(SIZE(D, 1),4)
+      @:CHECK_BOUNDS(SIZE(D, 2),4)
+
+      @:ASSERT_DEBUG(m >= -N,'invalid m')
+      @:ASSERT_DEBUG(m <= N,'invalid m')
+
+      ! Evaluate a diagonal matrix block
+
+      associate( &
+         Pr => pa%Pr,       &
+         R0 => pa%R0,       &
+         tau => pa%tau,     &
+         k_z => pa%k_z,     &
+         H_B => pa%H_B,     &
+         D_B => pa%D_B,     &
+         lam_f => pa%lam_f, &
+         l_f => pa%l_f,     &
+         E_psi => pa%E_psi, &
+         E_T => pa%E_T,     &
+         E_C => pa%E_C)
+
+         k2_m = m**2*l_f**2 + k_z**2         
+
+         D(1,1) = -Pr*k2_m
+         D(1,2) =  Pr*m*l_f/k2_m
+         D(1,3) = -Pr*m*l_f/k2_m
+         D(1,4) = -H_B*k_z
+
+         D(2,1) = -m*l_f
+         D(2,2) = -k2_m
+         D(2,3) = 0
+         D(2,4) = 0
+
+         D(3,1) = -m*l_f/R0
+         D(3,2) = 0
+         D(3,3) = -tau*k2_m
+         D(3,4) = 0
+
+         D(4,1) = k_z
+         D(4,2) = 0
+         D(4,3) = 0
+         D(4,4) = -D_B*k2_m
+
+      end associate
+
+   end subroutine eval_D
+
+   !****
+   
+   subroutine eval_L(N, m, pa, L)
+
+      integer, intent(in)        :: N
+      integer, intent(in)        :: m
+      type(params_t), intent(in) :: pa
+      real(RD), intent(out)      :: L(:,:)
+
+      real(RD) :: k2_m
+      real(RD) :: k2_m_m
+
+      @:CHECK_BOUNDS(SIZE(L, 1),4)
+      @:CHECK_BOUNDS(SIZE(L, 2),4)
+
+      @:ASSERT_DEBUG(m > -N,'invalid m')
+      @:ASSERT_DEBUG(m <= N,'invalid m')
+
+      ! Evaluate a lower matrix block
+
+      associate( &
+         Pr => pa%Pr,       &
+         k_z => pa%k_z,     &
+         H_B => pa%H_B,     &
+         D_B => pa%D_B,     &
+         lam_f => pa%lam_f, &
+         l_f => pa%l_f,     &
+         E_psi => pa%E_psi, &
+         E_T => pa%E_T,     &
+         E_C => pa%E_C)
+
+         k2_m = m**2*l_f**2 + k_z**2
+         k2_m_m = (m-1)**2*l_f**2 + k_z**2
+
+         L(1,1) = l_f**3*k_z*E_psi/k2_m - l_f*k_z*E_psi*k2_m_m/k2_m
+         L(1,2) = 0
+         L(1,3) = 0
+         L(1,4) = 0
+
+         L(2,1) = l_f*k_z*E_T
+         L(2,2) = -l_f*k_z*E_psi
+         L(2,3) = 0
+         L(2,4) = 0
+
+         L(3,1) = l_f*k_z*E_C
+         L(3,2) = 0
+         L(3,3) = -l_f*k_z*E_psi
+         L(3,4) = 0
+
+         L(4,1) = 0
+         L(4,2) = 0
+         L(4,3) = 0
+         L(4,4) = -l_f*k_z*E_psi
+
+      end associate
+
+   end subroutine eval_L
+
+   !****
+
+   subroutine eval_U(N, m, pa, U)
+
+      integer, intent(in)        :: N
+      integer, intent(in)        :: m
+      type(params_t), intent(in) :: pa
+      real(RD), intent(out)      :: U(:,:)
+
+      real(RD) :: k2_m
+      real(RD) :: k2_m_p
+
+      @:CHECK_BOUNDS(SIZE(U, 1),4)
+      @:CHECK_BOUNDS(SIZE(U, 2),4)
+
+      @:ASSERT_DEBUG(m >= -N,'invalid m')
+      @:ASSERT_DEBUG(m < N,'invalid m')
+
+      ! Evaluate a lower matrix block
+
+      associate( &
+         Pr => pa%Pr,       &
+         k_z => pa%k_z,     &
+         H_B => pa%H_B,     &
+         D_B => pa%D_B,     &
+         lam_f => pa%lam_f, &
+         l_f => pa%l_f,     &
+         E_psi => pa%E_psi, &
+         E_T => pa%E_T,     &
+         E_C => pa%E_C)
+ 
+         k2_m = m**2*l_f**2 + k_z**2
+         k2_m_p = (m+1)**2*l_f**2 + k_z**2
+
+         U(1,1) = -l_f**3*k_z*E_psi/k2_m + l_f*k_z*E_psi*k2_m_p/k2_m
+         U(1,2) = 0
+         U(1,3) = 0
+         U(1,4) = 0
+
+         U(2,1) = l_f*k_z*E_T
+         U(2,2) = l_f*k_z*E_psi
+         U(2,3) = 0
+         U(2,4) = 0
+
+         U(3,1) = l_f*k_z*E_C
+         U(3,2) = 0
+         U(3,3) = l_f*k_z*E_psi
+         U(3,4) = 0
+
+         U(4,1) = 0
+         U(4,2) = 0
+         U(4,3) = 0
+         U(4,4) = l_f*k_z*E_psi
+
+      end associate
+
+   end subroutine eval_U
+
+   !****
+
+   subroutine eval_A(N, pa, A)
+
+      integer, intent(in)        :: N
+      type(params_t), intent(in) :: pa
+      real(RD), intent(out)      :: A(:,:)
+
+      integer  :: m
+      integer  :: i
+
+      @:CHECK_BOUNDS(SIZE(A, 1),4*(2*N+1))
+      @:CHECK_BOUNDS(SIZE(A, 2),4*(2*N+1))
+
+      ! Evaluate the full system matrix
+
+      A = 0
+
+      i = 1
+
+      row_loop: do m = -N, N
+
+         call eval_D(N, m, pa, A(i:i+3,i:i+3))
+
+         if(m > -N) then
+            call eval_L(N, m, pa, A(i:i+3,i-4:i-1))
+         endif
+            
+         if (m < N) then
+            call eval_U(N, m, pa, A(i:i+3,i+4:i+7))
+         end if
+
+         i = i + 4
+
+      end do row_loop
+
+   end subroutine eval_A
+
+   !****
+
+   subroutine eval_prod(N, pa, x, y)
+
+      integer, intent(in)        :: N
+      type(params_t), intent(in) :: pa
+      real(RD), intent(in)       :: x(:)
+      real(RD), intent(out)      :: y(:)
+
+      integer  :: i
+      integer  :: m
+      real(RD) :: B(4,4)
+
+      @:CHECK_BOUNDS(SIZE(x), 4*(2*N+1))
+      @:CHECK_BOUNDS(SIZE(y), 4*(2*N+1))
+
+      ! Evaluate the system matrix operating as y <- A*x
+
+      i = 1
+
+      do m = -N, N
+
+         call eval_D(N, m, pa, B)
+         y(i:i+3) = MATMUL(B, x(i:i+3))
+
+         if(m > -N) then
+            call eval_L(N, m, pa, B)
+            y(i:i+3) = y(i:i+3) +  MATMUL(B, x(i-4:i-1))
+         end if
+
+         if(m < N) then
+            call eval_U(N, m, pa, B)
+            y(i:i+3) = y(i:i+3) + MATMUL(B, x(i+4:i+7))
+         end if
+
+         i = i + 4
+
+      end do
+
+   end subroutine eval_prod
+
+end module matrix_m

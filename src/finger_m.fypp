@@ -1,0 +1,58 @@
+#:include 'forum.inc'
+
+module finger_m
+
+   ! Uses
+
+   use forum_m
+
+   ! No implicit typing
+
+   implicit none
+
+   ! Access specifiers
+
+   private
+
+   public :: solve_finger
+
+contains
+
+   subroutine solve_finger(R0, Pr, tau, lam_f, l_f)
+
+      real(RD), intent(in)  :: R0
+      real(RD), intent(in)  :: Pr
+      real(RD), intent(in)  :: tau
+      real(RD), intent(out) :: lam_f
+      real(RD), intent(out) :: l_f
+
+      real(RD) :: a0
+      real(RD) :: a1
+      real(RD) :: a2
+      real(RD) :: a3
+      real(RD) :: p
+      real(RD) :: q
+      real(RD) :: tlam
+
+      ! Solve for thegrowth rate lam and horizontal wavenumber of the
+      ! fastest-growin fingering mode
+
+      a3 = Pr*(1-R0) + tau - R0
+      a2 = -2*(R0-1)*(Pr + tau + Pr*tau)
+      a1 = Pr + tau - 4*Pr*(R0-1)*tau - (1+Pr)*R0*tau**2
+      a0 = -2*Pr*tau*(R0*tau-1)
+
+      p = a1*a2/(6*a3**2) - a0/(2*a3) - (a2/(3*a3))**3
+      q = (a2/(3*a3))**2 - a1/(3*a3)
+
+      tlam = 2*SQRT(q)*COS(ACOS(p/SQRT(q)**3)/3) - a2/(3*a3)
+
+      l_f = (Pr*(1 + tlam - R0*(tau+tlam))/(R0*(1+tlam)*(Pr+tlam)*(tau+tlam)))**0.25
+
+      lam_f = l_f**2*tlam
+
+   end subroutine solve_finger
+
+end module finger_m
+
+

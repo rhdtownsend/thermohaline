@@ -1,0 +1,92 @@
+#:include 'forum.inc'
+
+module params_m
+
+   ! Uses
+
+   use forum_m
+   use finger_m
+
+   use ISO_FORTRAN_ENV
+
+   ! No implicit typing
+
+   implicit none
+
+   ! Derived-type definitions
+
+   type params_t
+      real(RD) :: R0    ! Density ratio
+      real(RD) :: Pr    ! Prandtl number
+      real(RD) :: tau   ! Inverse Lewis number
+      real(RD) :: H_B   ! Lorentz-force strength
+      real(RD) :: D_B   ! Resistive diffusivity ratio
+      real(RD) :: w_f   ! Vertical velocity amplitude
+      real(RD) :: k_z   ! Vertical wavenumber
+      real(RD) :: lam_f ! Fingering mode growth rate
+      real(RD) :: l_f   ! Fingering mode horizontal wavenumber
+      real(RD) :: E_psi ! F23, after eqn. (36)
+      real(RD) :: E_T   ! F23, eqn. (43)
+      real(RD) :: E_C   ! F23, eqn. (42)
+   end type params_t
+
+   ! Interfaces
+
+   interface params_t
+      module procedure params_t_
+   end interface params_t
+
+   ! Access specifiers
+
+   private
+
+   public :: params_t
+
+contains
+
+   function params_t_(R0, Pr, tau, H_B, D_B, w_f, k_z) result(pa)
+
+      real(RD), intent(in) :: R0
+      real(RD), intent(in) :: Pr
+      real(RD), intent(in) :: tau
+      real(RD), intent(in) :: H_B
+      real(RD), intent(in) :: D_B
+      real(RD), intent(in) :: w_f
+      real(RD), intent(in) :: k_z
+      type(params_t)       :: pa
+
+      ! Store parameters
+
+      pa%R0 = R0
+      pa%Pr = Pr
+      pa%tau = tau
+
+      pa%H_B = H_B
+      pa%D_B = D_B
+
+      pa%w_f = w_f
+      pa%k_z = k_z
+
+      ! Solve for the fingering-mode properties and associated
+      ! quantities
+
+      associate( &
+         lam_f => pa%lam_f, &
+         l_f => pa%l_f,     &
+         E_psi => pa%E_psi, &
+         E_T => pa%E_T,     &
+         E_C => pa%E_C)
+      
+         call solve_finger(R0, Pr, tau, lam_f, l_f)
+
+         E_psi = w_f/(2*l_f)
+         E_T   = -l_f*E_psi/(lam_f + l_f**2)
+         E_C   = -l_f*E_psi/(R0*(lam_f + tau*l_f**2))
+
+      end associate
+
+   end function params_t_
+
+end module params_m
+
+
