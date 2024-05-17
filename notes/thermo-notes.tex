@@ -1,0 +1,478 @@
+\documentclass{article}
+
+\usepackage{amsmath}
+\usepackage{xcolor}
+
+%% Page dimensions
+
+\special{papersize=8.5in,11in}
+\setlength{\pdfpageheight}{\paperheight}
+\setlength{\pdfpagewidth}{\paperwidth}
+
+\setlength{\textwidth}{6.5in} 
+\setlength{\textheight}{9in}
+\setlength{\topmargin}{0in} 
+\setlength{\oddsidemargin}{0in}
+\setlength{\evensidemargin}{0in} 
+\setlength{\headheight}{0in}
+\setlength{\headsep}{0in} 
+\setlength{\hoffset}{0in}
+\setlength{\voffset}{0in}
+
+%% Macros
+
+\newcommand{\shat}{\hat{\sigma}}
+
+\newcommand{\phat}{\hat{\psi}}
+\newcommand{\That}{\hat{T}}
+\newcommand{\Chat}{\hat{C}}
+\newcommand{\Ahat}{\hat{A}}
+
+\newcommand{\ptil}{\tilde{\psi}}
+\newcommand{\Ttil}{\tilde{T}}
+\newcommand{\Ctil}{\tilde{C}}
+\newcommand{\Atil}{\tilde{A}}
+
+\newcommand{\khat}{\hat{k}}
+\newcommand{\lhatf}{\hat{l}_{\rm f}}
+
+\newcommand{\Prd}{\mathrm{Pr}}
+\newcommand{\Rz}{R_{0}}
+\newcommand{\HB}{H_{B}}
+\newcommand{\DB}{D_{B}}
+\newcommand{\EhatT}{\hat{E}_{T}}
+\newcommand{\EhatC}{\hat{E}_{C}}
+\newcommand{\Ehatp}{\hat{E}_{\psi}}
+
+\newcommand{\Amat}{\boldsymbol{\mathsf{A}}}
+\newcommand{\Bmat}{\boldsymbol{\mathsf{B}}}
+\newcommand{\uvec}{\mathbf{u}}
+\newcommand{\vvec}{\mathbf{v}}
+
+\newcommand{\ii}{\mathrm{i}}
+
+\begin{document}
+
+\section{Linearized Equations}
+
+As the starting point, let's first restate the linearized equations
+given in Adrian's notes:
+%
+\begin{align}
+  \begin{split}
+  \shat \phat_{m} &=
+  \ii \frac{\lhatf \khat_z}{\khat^2_m} \Ehatp \left[
+    \left( \lhatf^2 - \khat^2_{m+1} \right) \phat_{m+1}
+    + \left( \lhatf^2 - \khat^2_{m-1} \right) \phat_{m-1}
+    \right]
+  - \Prd \khat^2_m \phat_m
+  - \ii \Prd \frac{m \lhatf}{\khat_m^2} \left( \That_m - \Chat_m \right) \\
+  & \qquad + \ii \HB \khat_z \Ahat_m,
+  \end{split} \\
+  \shat \That_m &=
+  - \ii \lhatf \khat_z \Ehatp \left( \That_{m+1} + \That_{m-1} \right)
+  - \lhatf \khat_z \EhatT \left( \phat_{m-1} - \phat_{m+1} \right)
+  - \ii m \lhatf \phat_m
+  - \khat^2_m \That_m, \\
+  \shat \Chat_m &=
+  - \ii \lhatf \khat_z \Ehatp \left( \Chat_{m+1} + \Chat_{m-1} \right)
+  - \lhatf \khat_z \EhatC \left( \phat_{m-1} - \phat_{m+1} \right)
+  - \ii m \lhatf \frac{\phat_m}{\Rz}
+  - \tau \khat^2_m \Chat_m, \\
+  \shat \Ahat_m &=
+  - \ii \lhatf \khat_z \Ehatp \left( \Ahat_{m+1} + \Ahat_{m-1} \right)
+  - \DB \khat^2_m \Ahat_m
+  + \ii \khat_z \phat_m,
+\end{align}
+
+\section{Real Formulation}
+
+The linearized equations can be transformed in real form (i.e., no
+explicit $\ii$ coefficients) by replacing the hatted variables
+($\phat_m, \That_m$, etc) with tilded variables ($\ptil_m, \Ttil_m$,
+etc), defined by the expressions
+%
+\begin{equation}
+  \phat_m = \ii^m \ptil_m, \qquad
+  \That_m = \ii^{m+1} \Ttil_m, \qquad
+  \Chat_m = \ii^{m+1} \Ctil_m, \quad
+  \Ahat_m = \ii^{m+1} \Atil_m.
+\end{equation}
+%
+Substituting these into the linearized equations, and dividing through
+by common factors of $\ii$, we obtain
+%
+\begin{align}
+  \begin{split}
+  \shat \ptil_{m} &=
+  \frac{\lhatf \khat_z}{\khat^2_m} \Ehatp \left[
+    {\color{red}-} \left( \lhatf^2 - \khat^2_{m+1} \right) \ptil_{m+1} 
+    + \left( \lhatf^2 - \khat^2_{m-1} \right) \ptil_{m-1}
+    \right]
+  - \Prd \khat^2_m \ptil_m
+  {\color{red}+} \Prd \frac{m \lhatf}{\khat_m^2} \left( \Ttil_m - \Ctil_m \right) \\
+  & \qquad {\color{red}-} \HB \khat_z \Atil_m,
+  \end{split} \\
+  \shat \Ttil_m &=
+  - \lhatf \khat_z \Ehatp \left( {\color{red}-} \Ttil_{m+1} + \Ttil_{m-1} \right)
+  - \lhatf \khat_z \EhatT \left( {\color{red}-} \ptil_{m-1} - \ptil_{m+1} \right)
+  - m \lhatf \ptil_m
+  - \khat^2_m \Ttil_m \\
+  \shat \Ctil_m &=
+  - \lhatf \khat_z \Ehatp \left( {\color{red}-} \Ctil_{m+1} + \Ctil_{m-1} \right)
+  - \lhatf \khat_z \EhatC \left( {\color{red}-} \ptil_{m-1} - \ptil_{m+1} \right)
+  - m \lhatf \frac{\ptil_m}{\Rz}
+  - \tau \khat^2_m \Ctil_m \\
+  \shat \Atil_m &=
+  - \lhatf \khat_z \Ehatp \left( {\color{red}-} \Atil_{m+1} + \Atil_{m-1} \right)
+  - \DB \khat^2_m \Atil_m
+  + \khat_z \ptil_m
+\end{align}
+%
+All of the $\ii$ factors have now gone, and some signs have flipped
+(I've highlighted these in red).
+
+\section{Matrix Structure}
+
+The real-coefficient equations above can be arranged into eigenproblem form as
+%
+\begin{equation}
+  \Amat \uvec = \shat \uvec,
+\end{equation}
+%
+Let's assume the eigenvector $\uvec$ has elements
+%
+\begin{equation}
+  \uvec =
+  \begin{bmatrix}
+    \vvec_{-N} \\
+    \vvec_{-N+1} \\
+    \vdots \\
+    \vvec_{N-1} \\
+    \vvec_{N}
+  \end{bmatrix},
+\end{equation}
+%
+where the 4-element `sub-vector' $\vvec_{m}$ is defined by
+%
+\begin{equation}
+  \vvec_{m} =
+  \begin{bmatrix}
+    \ptil_{m} \\
+    \Ttil_{m} \\
+    \Ctil_{m} \\
+    \Atil_{m}
+  \end{bmatrix}.
+\end{equation}
+%
+With this ordering of the dependent variables, the system matrix
+$\Amat$ has a block-tridiagonal structure:
+%
+\begin{equation}
+  \Amat =
+  \begin{bmatrix}
+    \Bmat_{-N,-N} & \Bmat_{-N,-N+1} & & & \\
+    \Bmat_{-N+1,-N} & \Bmat_{-N+1,-N+1} & \Bmat_{-N+1,-N+2} & & \\
+    & \ddots & \ddots & \ddots & \\
+    & & \Bmat_{N-1,N-2} & \Bmat_{N-1,N-1} & \Bmat_{N-1,N} \\
+    & & & \Bmat_{N,N-1} & \Bmat_{N,N}
+  \end{bmatrix}
+\end{equation}
+%
+with $4\times4$ blocks given by
+%
+\begin{equation}
+  \Bmat_{m,m-1} =
+  \begin{bmatrix}
+    \frac{\lhatf \khat_z}{\khat^2_m} \Ehatp \left( \lhatf^2 - \khat^2_{m-1} \right) &
+    0 &
+    0 &
+    0 \\
+    \lhatf \khat_z \EhatT &
+    -\lhatf \khat_z \Ehatp &
+    0 &
+    0 \\
+    \lhatf \khat_z \EhatC &
+    0 & 
+    -\lhatf \khat_z \Ehatp &
+    0 \\
+    0 &
+    0 &
+    0 &
+    -\lhatf \khat_z \Ehatp
+  \end{bmatrix},
+\end{equation}
+%
+\begin{equation}
+  \Bmat_{m,m} =
+  \begin{bmatrix}
+    -\Prd \khat^2_m &
+    \Prd \frac{m \lhatf}{\khat^2_m} &
+    -\Prd \frac{m \lhatf}{\khat^2_m} &
+    -\HB \khat_z \\
+    - m \lhatf &
+    -\khat^2_m &
+    0 &
+    0 \\
+    - \frac{m \lhatf}{\Rz} &
+    0 &
+    - \tau \khat^2_m &
+    0 \\
+    \khat_z &
+    0 &
+    0 &
+    - \DB \khat^2_m
+  \end{bmatrix},
+\end{equation}
+%
+and
+%
+\begin{equation}
+  \Bmat_{m,m+1} =
+  \begin{bmatrix}
+    -\frac{\lhatf \khat_z}{\khat^2_m} \Ehatp \left( \lhatf^2 - \khat^2_{m+1} \right) &
+    0 &
+    0 &
+    0 \\
+    \lhatf \khat_z \EhatT &
+    \lhatf \khat_z \Ehatp &
+    0 &
+    0 \\
+    \lhatf \khat_z \EhatC &
+    0 &
+    \lhatf \khat_z \Ehatp &
+    0 \\
+    0 &
+    0 &
+    0 &
+    \lhatf \khat_z \Ehatp
+  \end{bmatrix}.
+\end{equation}
+%
+
+\section{Parity Splitting}
+
+Adrian's notes demonstrate how the system of linearized equations can
+be split into subsystems with opposite parities. Let's
+follow this approach for the real-coefficient equations, by defining
+%
+\begin{multline}
+  \ptil_m^{\pm} = \ii^m \left( \phat_m \pm \phat_{-m} \right), \qquad
+  \Ttil_m^{\pm} = \ii^{m+1} \left( \That_m \pm \That_{-m} \right), \\
+  \Ctil_m^{\pm} = \ii^{m+1} \left( \Chat_m \pm \Chat_{-m} \right), \qquad
+  \Atil_m^{\pm} = \ii^{m+1} \left( \Ahat_m \pm \Ahat_{-m} \right),
+\end{multline}
+%
+for $m > 0$. The $m=0$ case is a little special, in that
+$\ptil_{0}^{+} = 2 \ptil_{0}$ while $\ptil^{-} = 0$ (and similarly for
+the other three variables). With these definitions, the equations for
+$m > 0$ become
+%
+\begin{align}
+  \begin{split}
+  \shat \ptil_{m}^{\pm} &=
+  \frac{\lhatf \khat_z}{\khat^2_m} \Ehatp \left[
+    - \left( \lhatf^2 - \khat^2_{m+1} \right) \ptil_{m+1}^{\pm} 
+    + \left( \lhatf^2 - \khat^2_{m-1} \right) \ptil_{m-1}^{\pm}
+    \right]
+  - \Prd \khat^2_m \ptil_m^{\pm}
+  + \Prd \frac{m \lhatf}{\khat_m^2} \left( \Ttil_m^{\mp} - \Ctil_m^{\mp} \right) \\
+  & \qquad - \HB \khat_z \Atil_m^{\pm},
+  \end{split} \\
+  \shat \Ttil_m^{\pm} &=
+  - \lhatf \khat_z \Ehatp \left( - \Ttil_{m+1}^{\pm} + \Ttil_{m-1}^{\pm} \right)
+  - \lhatf \khat_z \EhatT \left( - \ptil_{m-1}^{\mp} - \ptil_{m+1}^{\mp} \right)
+  - m \lhatf \ptil_m^{\mp}
+  - \khat^2_m \Ttil_m^{\pm}, \\
+  \shat \Ctil_m^{\pm} &=
+  - \lhatf \khat_z \Ehatp \left( - \Ctil_{m+1}^{\pm} + \Ctil_{m-1}^{\pm} \right)
+  - \lhatf \khat_z \EhatC \left( - \ptil_{m-1}^{\mp} - \ptil_{m+1}^{\mp} \right)
+  - m \lhatf \frac{\ptil_m^{\mp}}{\Rz}
+  - \tau \khat^2_m \Ctil_m^{\pm}, \\
+  \shat \Atil_m^{\pm} &=
+  - \lhatf \khat_z \Ehatp \left( - \Atil_{m+1}^{\pm} + \Atil_{m-1}^{\pm} \right)
+  - \DB \khat^2_m \Atil_m^{\pm}
+  + \khat_z \ptil_m^{\pm}.
+\end{align}
+%
+For $m = 0$, the equations are
+%
+\begin{align}
+  \shat \ptil_{0}^{+} &=
+  2 \frac{\lhatf \khat_z}{\khat^2_0} \Ehatp \left[
+    - \left( \lhatf^2 - \khat^2_{1} \right) \ptil_{1}^{+} 
+    \right]
+  - \Prd \khat^2_0 \ptil_0^{+}
+  - \HB \khat_z \Atil_0^{+},
+  \\ 
+  \shat \Ttil_0^{+} &=
+  - 2 \lhatf \khat_z \Ehatp \left( - \Ttil_{1}^{+} \right)
+  - 2 \lhatf \khat_z \EhatT \left( - \ptil_{1}^{-} \right)
+  - \khat^2_0 \Ttil_0^{+}, \\
+  \shat \Ctil_0^{+} &=
+  - 2 \lhatf \khat_z \Ehatp \left( - \Ctil_{1}^{+} \right)
+  - 2 \lhatf \khat_z \EhatC \left( - \ptil_{1}^{-} \right)
+  - \tau \khat^2_0 \Ctil_0^{+}, \\
+  \shat \Atil_0^{+} &=
+  - 2 \lhatf \khat_z \Ehatp \left( - \Atil_{1}^{+} \right)
+  - \DB \khat^2_0 \Atil_0^{+}
+  + \khat_z \ptil_0^{+}.
+\end{align}
+%
+(these look slightly different from Adrian's notes, because we are
+using $\ptil_{0}^{+} = 2 \ptil_{0}$ rather than $\ptil_{0}$, etc;
+that's what causes the additional factors of two).
+
+With this parity splitting, the system of equations splits into a pair
+of decoupled subsystems: one involving only $\ptil_m^+$, $\Ttil_m^-$,
+$\Ctil_m^-$ and $\Atil_m^+$, and the other only $\ptil_m^-$,
+$\Ttil_m^+$, $\Ctil_m^+$ and $\Atil_m^-$. Similarly to before, each
+subsystem can be arranged into eigenproblem form as
+%
+\begin{equation}
+  \Amat^{\pm} \uvec^{\pm} = \shat \uvec^{\pm},
+\end{equation}
+%
+Let's assume the eigenvectors $\uvec^{\pm}$ have elements
+%
+\begin{equation}
+  \uvec^{\pm} =
+  \begin{bmatrix}
+    \vvec_{0}^{\pm} \\
+    \vvec_{1}^{\pm} \\
+    \vdots \\
+    \vvec_{N-1}^{\pm} \\
+    \vvec_{N}^{\pm}
+  \end{bmatrix},
+\end{equation}
+%
+where the subvectors $\vvec_{m}^{\pm}$ are defined by
+%
+\begin{equation}
+  \vvec_{m}^{\pm} =
+  \begin{bmatrix}
+    \ptil_{m}^{\pm} \\
+    \Ttil_{m}^{\mp} \\
+    \Ctil_{m}^{\mp} \\
+    \Atil_{m}^{\pm}
+  \end{bmatrix}
+\end{equation}
+%
+for $m > 0$. The $m = 0$ subvectors are special, in that they have a length of 2 rather than 4:
+%
+\begin{equation}
+  \vvec_{0}^{+} =
+  \begin{bmatrix}
+    \ptil_{0}^{+} \\
+    \Atil_{0}^{+}
+  \end{bmatrix},
+  \qquad
+  \vvec_{0}^{-} =
+  \begin{bmatrix}
+    \Ttil_{0}^{-} \\
+    \Ctil_{0}^{-}
+  \end{bmatrix}.
+\end{equation}
+%
+With this ordering of the dependent variables, the system matrices $\Amat^{\pm}$ take the form
+%
+\begin{equation}
+  \Amat^{\pm} =
+  \begin{bmatrix}
+    \Bmat_{0,0}^{\pm} & \Bmat_{0,1}^{\pm} & & & \\
+    \Bmat_{1,0}^{\pm} & \Bmat_{1,1}^{\pm} & \Bmat_{1,2}^{\pm} & & \\
+    & \ddots & \ddots & \ddots & \\
+    & & \Bmat_{N-1,N-2}^{\pm} & \Bmat_{N-1,N-1}^{\pm} & \Bmat_{N-1,N}^{\pm} \\
+    & & & \Bmat_{N,N-1}^{\pm} & \Bmat_{N,N}^{\pm}
+  \end{bmatrix}.
+\end{equation}
+%
+The definitions of the blocks $\Bmat^{\pm}$ are the same as the
+corresponding $\Bmat$, with the exception of the top-left corner:
+%
+\begin{equation}
+  \Bmat_{0,0}^{+} =
+  \begin{bmatrix}
+    - \Prd \khat_0^2 &
+    - \HB \khat_z \\
+    \khat_z &
+    - \DB \khat_0^2
+  \end{bmatrix},
+  \qquad
+  \Bmat_{0,0}^{-} =
+  \begin{bmatrix}
+    - \khat_0^2 &
+    0 \\
+    0 &
+    -\tau \khat_0^2
+  \end{bmatrix},
+\end{equation}
+%
+\begin{equation}
+  \Bmat_{1,0}^{+} =
+  \begin{bmatrix}
+    \frac{\lhatf \khat_z}{\khat^2_1} \Ehatp \left( \lhatf^2 - \khat^2_{0} \right) &
+    0 \\
+    \lhatf \khat_z \EhatT &
+    0 \\
+    \lhatf \khat_z \EhatC &
+    0 \\
+    0 &
+    -\lhatf \khat_z \Ehatp
+  \end{bmatrix},
+  \qquad
+  \Bmat_{1,0}^{-} =
+  \begin{bmatrix}
+    0 &
+    0 \\
+    -\lhatf \khat_z \Ehatp &
+    0 \\
+    0 & 
+    -\lhatf \khat_z \Ehatp \\
+    0 &
+    0
+  \end{bmatrix},
+\end{equation}
+%
+and
+%
+\begin{equation}
+  \Bmat_{0,1}^{+} =
+  \begin{bmatrix}
+    - 2 \frac{\lhatf \khat_z}{\khat^2_0} \Ehatp \left( \lhatf^2 - \khat^2_{1} \right) &
+    0 &
+    0 &
+    0 \\
+    0 &
+    0 &
+    0 &
+    2 \lhatf \khat_z \Ehatp
+  \end{bmatrix},
+  \qquad
+  \Bmat_{0,1}^{-} =
+  \begin{bmatrix}
+    2 \lhatf \khat_z \EhatT &
+    2 \lhatf \khat_z \Ehatp &
+    0 &
+    0 \\
+    2 \lhatf \khat_z \EhatC &
+    0 &
+    2 \lhatf \khat_z \Ehatp &
+    0
+  \end{bmatrix}.
+\end{equation}
+
+
+
+
+\end{document}
+
+  
+    
+    
+  
+  
+    
+  
+  
+    

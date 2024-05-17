@@ -12,5 +12,6 @@
   w_f = 0.0003806622073821217
   H_B = 1e-7
   D_B = 1e-5
+  split = .TRUE.
   out_file = 'thermo.h5'
 /  

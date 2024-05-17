@@ -4,7 +4,7 @@ program thermo
 
    ! Uses
 
-   use forum_m
+   use forum_m, split_ => split
    use params_m
    use matrix_m
    use finger_m
@@ -35,20 +35,21 @@ program thermo
    real(RD)                 :: D_B
    real(RD)                 :: w_f
    integer                  :: N
+   logical                  :: split
    character(256)           :: out_file
    real(RD)                 :: lam_f
    real(RD)                 :: l_f
    real(RD), allocatable    :: k_z(:)
    type(params_t)           :: pa
    integer                  :: i
-   complex(RD), allocatable :: sig2(:,:)
-   complex(RD), allocatable :: sig2_max(:)
+   complex(RD), allocatable :: sig(:,:)
+   complex(RD), allocatable :: sig_max(:)
    type(hdf5io_t)           :: hi
 
    namelist /params/ &
       k_z_min, k_z_max, n_k_z, log_k_z, rescale_k_z_min, rescale_k_z_max, &
       R0, Pr, tau, H_B, D_B, w_f, &
-      N, &
+      N, split, &
       out_file
 
    ! Read arguments
@@ -74,6 +75,8 @@ program thermo
    D_B = 1.
    w_f = 1.
 
+   split = .FALSE.
+
    open(NEWUNIT=unit, STATUS='OLD', FILE=nml_file)
    read(unit, NML=params)
    close(unit)
@@ -96,8 +99,8 @@ program thermo
 
    allocate(k_z(n_k_z))
 
-   allocate(sig2(4*(2*N+1), n_k_z))
-   allocate(sig2_max(n_k_z))
+   allocate(sig(4*(2*N+1), n_k_z))
+   allocate(sig_max(n_k_z))
 
    !$OMP PARALLEL DO PRIVATE(pa)
    do i = 1, n_k_z
@@ -114,11 +117,11 @@ program thermo
 
       ! Evaluate the full set of eigenvalues
 
-      call eigen_all(N, pa, sig2(:,i))
+      call eigen_all(N, pa, split, sig(:,i))
 
       ! Evaluate the eigenvalue with largest real part
 
-      !call eigen_max(N, pa, sig2_max(i))
+      !call eigen_max(N, pa, sig_max(i))
 
    end do
 
@@ -130,7 +133,7 @@ program thermo
    call hi%write_attr('l_f', l_f)
 
    call hi%write_dset('k_z', k_z)
-   call hi%write_dset('sig2', sig2)
+   call hi%write_dset('sig', sig)
 
    call hi%final()
 
@@ -138,37 +141,52 @@ program thermo
 
 contains
 
-   subroutine eigen_all(N, pa, sig2)
+   subroutine eigen_all(N, pa, split, sig)
 
       integer, intent(in)        :: N
       type(params_t), intent(in) :: pa
-      complex(RD), intent(out)   :: sig2(:)
+      logical, intent(in)        :: split
+      complex(RD), intent(out)   :: sig(:)
 
-      real(RD) :: A(4*(2*N+1),4*(2*N+1))
-      real(RD) :: wr(4*(2*N+1))
-      real(RD) :: wi(4*(2*N+1))
+      real(RD), allocatable :: A(:,:)
+      real(RD), allocatable :: wr(:)
+      real(RD), allocatable :: wi(:)
 
-      ! Set up the matrix
+      if (split) then
 
-      call eval_A(N, pa, A)
+         allocate(A(2*(2*N+1),2*(2*N+1)))
+         allocate(wr(2*(2*N+1)))
+         allocate(wi(2*(2*N+1)))
 
-      ! Diagonalize it
+         call eval_matrix(N, pa, A, .TRUE.)
+         call LA_GEEV(A, wr, wi)
+         sig(1::2) = CMPLX(wr, wi, KIND=RD)
+         
+         call eval_matrix(N, pa, A, .FALSE.)
+         call LA_GEEV(A, wr, wi)
+         sig(2::2) = CMPLX(wr, wi, KIND=RD)
 
-      call LA_GEEV(A, wr, wi)
+      else
 
-      ! Return the eigenvalues
+         allocate(A(4*(2*N+1),4*(2*N+1)))
+         allocate(wr(4*(2*N+1)))
+         allocate(wi(4*(2*N+1)))
 
-      sig2 = CMPLX(wr, wi, KIND=RD)
+         call eval_matrix(N, pa, A)
+         call LA_GEEV(A, wr, wi)
+         sig = CMPLX(wr, wi, KIND=RD)
+         
+      end if
 
    end subroutine eigen_all
 
    ! !****
 
-   ! subroutine eigen_max(N, pa, sig2_max)
+   ! subroutine eigen_max(N, pa, sig_max)
 
    !    integer, intent(in)        :: N
    !    type(params_t), intent(in) :: pa
-   !    complex(RD), intent(out)   :: sig2_max
+   !    complex(RD), intent(out)   :: sig_max
 
    !    integer, parameter  :: NEV = 1
    !    integer, parameter  :: NCV = 2*NEV + 1
@@ -258,20 +276,20 @@ contains
 
    !    ! Store the eigenvalue
 
-   !    sig2_max = CMPLX(dr(1), di(1), KIND=RD)
+   !    sig_max = CMPLX(dr(1), di(1), KIND=RD)
 
-   !    print *,sig2_max
+   !    print *,sig_max
 
    ! end subroutine eigen_max
 
    ! !****
 
-   ! subroutine eigen_close(N, pa, sig2_shift, sig2_close)
+   ! subroutine eigen_close(N, pa, sig_shift, sig_close)
       
    !    integer, intent(in)        :: N
    !    type(params_t), intent(in) :: pa
-   !    complex(RD), intent(in)    :: sig2_shift
-   !    complex(RD), intent(out)   :: sig2_close
+   !    complex(RD), intent(in)    :: sig_shift
+   !    complex(RD), intent(out)   :: sig_close
 
    !    integer, parameter  :: NEV = 1
    !    integer, parameter  :: NCV = 2*NEV + 1
@@ -361,9 +379,9 @@ contains
 
    !    ! Store the eigenvalue
 
-   !    sig2_close = CMPLX(dr(1), di(1), KIND=RD)
+   !    sig_close = CMPLX(dr(1), di(1), KIND=RD)
 
-   !    print *,sig2_close
+   !    print *,sig_close
 
    ! end subroutine eigen_close
 
