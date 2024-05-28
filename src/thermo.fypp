@@ -1,5 +1,17 @@
 #:include 'forum.inc'
 
+! preprocessor macros
+
+! defines the prob size
+#:def prob_size(N)
+4*(2*${N}$+1)
+#:enddef
+
+! defines the size of parity blocks
+#:def block_size(N)
+2*(2*${N}$+1)
+#:enddef
+
 program thermo
 
    ! Uses
@@ -43,8 +55,12 @@ program thermo
    type(params_t)           :: pa
    integer                  :: i
    complex(RD), allocatable :: sig(:,:)
-   complex(RD), allocatable :: sig_max(:)
+   complex(RD), allocatable :: sig_max_ar(:), sig_max_la(:)
    type(hdf5io_t)           :: hi
+
+   ! some of my additions
+   integer                  :: max_ind(1), info
+   logical, allocatable     :: ar_sucess(:)
 
    namelist /params/ &
       k_z_min, k_z_max, n_k_z, log_k_z, rescale_k_z_min, rescale_k_z_max, &
@@ -99,10 +115,14 @@ program thermo
 
    allocate(k_z(n_k_z))
 
-   allocate(sig(4*(2*N+1), n_k_z))
-   allocate(sig_max(n_k_z))
+   allocate(sig(@{prob_size(N)}@, n_k_z))
+   allocate(sig_max_ar(n_k_z))
+   allocate(sig_max_la(n_k_z))
+   allocate(ar_sucess(n_k_z))
 
-   !$OMP PARALLEL DO PRIVATE(pa)
+   ar_sucess = .true.
+
+   !!$OMP PARALLEL DO PRIVATE(pa)
    do i = 1, n_k_z
 
       ! Set up parameters
@@ -119,11 +139,37 @@ program thermo
 
       call eigen_all(N, pa, split, sig(:,i))
 
+      max_ind       = MAXLOC(sig(:,i)%re)
+      sig_max_la(i) = sig(max_ind(1),i)
+
       ! Evaluate the eigenvalue with largest real part
 
-      !call eigen_max(N, pa, sig_max(i))
+      if (i > 1) then
+
+         call eigen_shift_inv(N, pa, sig_max_ar(i-1), split, sig_max_ar(i), info)
+
+         if (info /= 0) then
+            ! ARPACK failed, use the LAPACK result
+            sig_max_ar(i) = sig_max_la(i)
+            ar_sucess(i)  = .false.
+            print *, 'ARPACK failed at index i = ', i
+         end if
+         ! print *, 'i = ', i, 'LAPACK result = ', sig_max_la(i), 'ARPACK result = ', sig_max_ar(i)
+
+      else
+
+         sig_max_ar(i) = sig_max_la(i)
+         ! print *, 'i = ', i, 'LAPACK result = ', sig_max_la(i)
+
+      end if
+      ! print *, ''
+      ! print *, 'i = ', i, 'ARPACK result = ', sig_max(i)
+
 
    end do
+
+   print *,'loop complete!'
+   stop
 
    ! Write out results
 
@@ -134,6 +180,9 @@ program thermo
 
    call hi%write_dset('k_z', k_z)
    call hi%write_dset('sig', sig)
+   call hi%write_dset('sig_max_la', sig_max_la)
+   call hi%write_dset('sig_max_ar', sig_max_ar)
+   call hi%write_dset('ar_sucess', ar_sucess)
 
    call hi%final()
 
@@ -154,9 +203,9 @@ contains
 
       if (split) then
 
-         allocate(A(2*(2*N+1),2*(2*N+1)))
-         allocate(wr(2*(2*N+1)))
-         allocate(wi(2*(2*N+1)))
+         allocate(A(@{block_size(N)}@,@{block_size(N)}@))
+         allocate(wr(@{block_size(N)}@))
+         allocate(wi(@{block_size(N)}@))
 
          call eval_matrix(N, pa, A, .TRUE.)
          call LA_GEEV(A, wr, wi)
@@ -168,9 +217,9 @@ contains
 
       else
 
-         allocate(A(4*(2*N+1),4*(2*N+1)))
-         allocate(wr(4*(2*N+1)))
-         allocate(wi(4*(2*N+1)))
+         allocate(A(@{prob_size(N)}@,@{prob_size(N)}@))
+         allocate(wr(@{prob_size(N)}@))
+         allocate(wi(@{prob_size(N)}@))
 
          call eval_matrix(N, pa, A)
          call LA_GEEV(A, wr, wi)
@@ -182,105 +231,322 @@ contains
 
    ! !****
 
-   ! subroutine eigen_max(N, pa, sig_max)
+   subroutine eigen_max(N, pa, sig_max)
 
-   !    integer, intent(in)        :: N
-   !    type(params_t), intent(in) :: pa
-   !    complex(RD), intent(out)   :: sig_max
+      integer, intent(in)        :: N
+      type(params_t), intent(in) :: pa
+      complex(RD), intent(out)   :: sig_max
 
-   !    integer, parameter  :: NEV = 1
-   !    integer, parameter  :: NCV = 2*NEV + 1
-   !    integer, parameter  :: LWORKL = 3*NCV**2 + 6*NCV
-   !    real(RD), parameter :: TOL = 1E-6_RD
+      integer, parameter   :: NEV = 30
+      integer, parameter   :: NCV = 2*NEV + 1
+      integer, parameter   :: LWORKL = 3*NCV**2 + 6*NCV
+      real(RD), parameter  :: TOL = 1E-6_RD
+      character(len=2), parameter :: which = 'LR'
+      character, parameter :: bmat = 'I'
 
-   !    integer  :: ido
-   !    integer  :: iparam(11)
-   !    integer  :: ipntr(14)
-   !    real(RD) :: resid(4*(2*N+1))
-   !    real(RD) :: v(4*(2*N+1),NCV)
-   !    real(RD) :: workd(3*4*(2*N+1))
-   !    real(RD) :: workl(LWORKL)
-   !    integer  :: info
-   !    real(RD) :: dr(NEV+1)
-   !    real(RD) :: di(NEV+1)
-   !    real(RD) :: z(4*(2*N+1),NEV+1)
-   !    real(RD) :: workev(3*NCV)
-   !    logical  :: select(NCV)
-   !    integer  :: ierr
+      integer  :: ido
+      integer  :: iparam(11)
+      integer  :: ipntr(14)
+      real(RD) :: resid(@{prob_size(N)}@)
+      real(RD) :: v(@{prob_size(N)}@,NCV)
+      real(RD) :: workd(3*@{prob_size(N)}@)
+      real(RD) :: workl(LWORKL)
+      integer  :: info
+      real(RD) :: dr(NEV+1)
+      real(RD) :: di(NEV+1)
+      real(RD) :: z(@{prob_size(N)}@,NEV+1)
+      real(RD) :: workev(3*NCV)
+      logical  :: select(NCV)
+      integer  :: ierr
 
-   !    ! Find the maximal eigenvalue
+      ! Find the maximal eigenvalue
 
-   !    ! First set up parameters
+      ! First set up parameters
 
-   !    iparam = 0
+      iparam = 0
 
-   !    iparam(1) = 1
-   !    iparam(3) = 300
-   !    iparam(7) = 1
+      iparam(1) = 1
+      iparam(3) = 300
+      iparam(7) = 1
 
-   !    ido = 0
-   !    info = 0
+      ido  = 0
+      info = 0
 
-   !    iter_loop : do
+      iter_loop : do
 
-   !       call DNAUPD(ido, 'I', 4*(2*N+1), 'LR', NEV, TOL, resid, &
-   !          NCV, v, SIZE(v, 1), iparam, ipntr, workd, workl, LWORKL, &
-   !          info)
+         call DNAUPD(ido, bmat, @{prob_size(N)}@, which, NEV, TOL, resid, &
+            NCV, v, SIZE(v, 1), iparam, ipntr, workd, workl, LWORKL, &
+            info)
 
-   !       if (ido == -1 .OR. ido == 1) then
+         if (ido == -1 .OR. ido == 1) then
 
-   !          associate( &
-   !             x => workd(ipntr(1):ipntr(1)+4*(2*N+1)-1), &
-   !             y => workd(ipntr(2):ipntr(2)+4*(2*N+1)-1))
+            associate( &
+               x => workd(ipntr(1):ipntr(1)+@{prob_size(N)}@-1), &
+               y => workd(ipntr(2):ipntr(2)+@{prob_size(N)}@-1))
 
-   !             call eval_prod(N, pa, x, y)
+               call eval_prod_full(N, pa, x, y)
 
-   !          end associate
+            end associate
 
-   !       else
+         else
 
-   !          exit iter_loop
+            exit iter_loop
 
-   !       end if
+         end if
 
-   !    end do iter_loop
+      end do iter_loop
 
-   !    ! Check for convergence
+      ! Check for convergence
 
-   !    if (info < 0) then
+      if (info /= 0) then
 
-   !       print *, ' '
-   !       print *, ' Error with _naupd, info = ', info
-   !       print *, ' Check the documentation of _naupd'
-   !       print *, ' '
-   !       stop
+         print *, ' '
+         print *, ' Error with _naupd, info = ', info
+         print *, ' Check the documentation of _naupd'
+         print *, ' '
+         stop
+         ! return
 
-   !    else
+      else
 
-   !       call DNEUPD(.FALSE., 'A', select, dr, di, z, SIZE(z, 1), &
-   !          0._RD, 0._RD, workev, 'I', 4*(2*N+1), 'LR', NEV, TOL, &
-   !          resid, NCV, v, SIZE(v, 1), iparam, ipntr, workd, workl, &
-   !          LWORKL, ierr)
+         call DNEUPD(.FALSE., 'A', select, dr, di, z, SIZE(z, 1), &
+            0._RD, 0._RD, workev, bmat, @{prob_size(N)}@, which, NEV, TOL, &
+            resid, NCV, v, SIZE(v, 1), iparam, ipntr, workd, workl, &
+            LWORKL, ierr)
 
-   !       if (ierr /= 0) then
+         if (ierr /= 0) then
 
-   !          print *, ' '
-   !          print *, ' Error with _neupd, info = ', ierr
-   !          print *, ' Check the documentation of _neupd. '
-   !          print *, ' '
-   !          stop
+            print *, ' '
+            print *, ' Error with _neupd, info = ', ierr
+            print *, ' Check the documentation of _neupd. '
+            print *, ' '
+            stop
+            ! return
 
-   !       end if
+         end if
          
-   !    endif
+      endif
 
-   !    ! Store the eigenvalue
+      ! Store the eigenvalue
 
-   !    sig_max = CMPLX(dr(1), di(1), KIND=RD)
+      sig_max = CMPLX(dr(NEV), di(NEV), KIND=RD)
 
-   !    print *,sig_max
+      ! print *,sig_max
 
-   ! end subroutine eigen_max
+   end subroutine eigen_max
+
+   subroutine apply_shift(sig_shift, A)
+      real(RD), intent(in)    :: sig_shift
+      real(RD), intent(inout) :: A(:,:)
+
+      integer :: i
+
+      @:ASSERT_DEBUG(SIZE(A,1) == SIZE(A,2),'non-square matrix given to shift')
+
+      do i = 1, SIZE(A, 1)
+         A(i,i) = A(i,i) - sig_shift
+      end do
+
+   end subroutine apply_shift
+
+   subroutine eigen_shift_inv(N, pa, sig_shift, split, sig_max, info) !, NEV, NCV, LWORKL, info, ierr)
+
+      integer, intent(in)        :: N
+      type(params_t), intent(in) :: pa
+      complex(RD), intent(in)    :: sig_shift ! e-value shift
+      logical, intent(in)        :: split ! determine whether to use exp or trig basis
+      complex(RD), intent(out)   :: sig_max
+      integer, intent(out)       :: info
+
+      ! ARPACK parameters
+      integer, parameter   :: NEV = 1
+      integer, parameter   :: NCV = 2*NEV + 1
+      integer, parameter   :: LWORKL = 3*NCV**2 + 6*NCV
+      real(RD), parameter  :: TOL = 1E-6_RD
+      character(len=2), parameter :: which = 'LR'
+      character, parameter :: bmat = 'I'
+
+      integer  :: ido
+      integer  :: iparam(11)
+      integer  :: ipntr(14)
+      real(RD) :: resid(@{prob_size(N)}@)
+      real(RD) :: v(@{prob_size(N)}@,NCV)
+      real(RD) :: workd(3*@{prob_size(N)}@)
+      real(RD) :: workl(LWORKL)
+      ! integer  :: info
+      real(RD) :: dr(NEV+1)
+      real(RD) :: di(NEV+1)
+      real(RD) :: z(@{prob_size(N)}@,NEV+1)
+      real(RD) :: workev(3*NCV)
+      logical  :: select(NCV)
+      ! integer  :: ierr
+
+      ! matrix solving variables
+      real(RD), allocatable :: A(:,:), B(:,:) ! B get's used to seperate parities if split is TRUE
+      real(RD)              :: tmp(@{prob_size(N)}@)
+      integer               :: IPIV(@{prob_size(N)}@)
+      integer               :: la_info
+
+      ! Find the maximal eigenvalue using shift-invert mode
+
+      ! First set up parameters
+
+      iparam = 0
+
+      iparam(1) = 1
+      iparam(3) = 1000
+      iparam(7) = 3 ! 3 sets to shift inver mode
+
+      ido  = 0
+      info = 0
+
+      ! initialize and factor matrix
+      
+      if (split) then
+
+         ! use trig basis
+
+         allocate( A(@{block_size(N)}@,@{block_size(N)}@), B(@{block_size(N)}@,@{block_size(N)}@) )
+
+         call eval_matrix(N, pa, A, .true.)
+         call eval_matrix(N, pa, B, .false.)
+
+         ! apply shift
+         call apply_shift(sig_shift%re, A)
+         call apply_shift(sig_shift%re, B)
+
+         ! perform PLU factorization
+         call DGETRF(@{block_size(N)}@,@{block_size(N)}@, A, @{block_size(N)}@, IPIV(1:@{block_size(N)}@), la_info)
+         if (la_info /= 0) then
+            print *, 'Error with PLU factorisation in first block, info = ', la_info
+            stop
+         end if
+
+         call DGETRF(@{block_size(N)}@,@{block_size(N)}@, B, @{block_size(N)}@, IPIV(@{block_size(N)}@+1 : @{prob_size(N)}@), la_info)
+         if (la_info /= 0) then
+            print *, 'Error with PLU factorisation in second block, info = ', la_info
+            stop
+         end if
+
+      else
+
+         ! use exponential basis
+
+         allocate( A(@{prob_size(N)}@, @{prob_size(N)}@) )
+
+         call eval_matrix(N, pa, A)
+
+         ! apply shift
+         call apply_shift(sig_shift%re, A)
+
+         ! perform PLU factorization
+         call DGETRF(@{prob_size(N)}@,@{prob_size(N)}@, A, @{prob_size(N)}@, IPIV, la_info)
+         if (la_info /= 0) then
+            print *, 'Error with PLU factorisation, info = ', la_info
+            stop
+         end if
+         
+      end if
+
+
+      iter_loop : do
+
+         call DNAUPD(ido, bmat, @{prob_size(N)}@, which, NEV, TOL, resid, &
+            NCV, v, SIZE(v, 1), iparam, ipntr, workd, workl, LWORKL, &
+            info)
+
+         if (ido == -1 .OR. ido == 1) then
+
+            associate( &
+               x => workd(ipntr(1):ipntr(1)+@{prob_size(N)}@-1), &
+               y => workd(ipntr(2):ipntr(2)+@{prob_size(N)}@-1))
+
+               ! call eval_prod_full(N, pa, x, y)
+
+               tmp = x
+
+               if (split) then
+
+                  call DGETRS('N', @{block_size(N)}@, 1, A, @{block_size(N)}@, & 
+                     IPIV(1 : @{block_size(N)}@), tmp( 1 : @{block_size(N)}@), @{block_size(N)}@, la_info)
+                  if (la_info /= 0) then
+                     print *, 'Error with linear solve in first block, info = ', la_info
+                     stop
+                  end if
+
+                  call DGETRS('N', @{block_size(N)}@, 1, B, & 
+                     @{block_size(N)}@, IPIV(@{block_size(N)}@ + 1 : @{prob_size(N)}@), & 
+                     tmp(@{block_size(N)}@ + 1 : @{prob_size(N)}@), @{block_size(N)}@, la_info)
+                  if (la_info /= 0) then
+                     print *, 'Error with linear solve in second block, info = ', la_info
+                     stop
+                  end if
+
+               else
+
+                  call DGETRS('N', @{prob_size(N)}@, 1, A, @{prob_size(N)}@, IPIV, tmp, @{prob_size(N)}@, la_info)
+                  if (la_info /= 0) then
+                     print *, 'Error with linear solve, info = ', la_info
+                     stop
+                  end if
+
+               end if
+
+               y = tmp
+
+            end associate
+
+         else
+
+            exit iter_loop
+
+         end if
+
+      end do iter_loop
+
+      ! print *, 'Finished iteration, num itrs = ', iparam(3)
+      ! print *, 'number of OPs = ', iparam(9)
+
+      ! Check for convergence
+
+      if (info /= 0) then
+
+         ! print *, ' '
+         ! print *, ' Error with _naupd, info = ', info
+         ! print *, ' Check the documentation of _naupd'
+         ! print *, ' '
+         ! stop
+         return
+
+      else
+         ! print *, 'CALLING DNEUPD'
+
+         call DNEUPD(.TRUE., 'A', select, dr, di, z, SIZE(z, 1), &
+            sig_shift%re, sig_shift%im, workev, bmat, @{prob_size(N)}@, which, NEV, TOL, &
+            resid, NCV, v, SIZE(v, 1), iparam, ipntr, workd, workl, &
+            LWORKL, info)
+         ! print *, 'FINISHED CALL'
+
+         if (info /= 0) then
+
+            ! print *, ' '
+            ! print *, ' Error with _neupd, info = ', info
+            ! print *, ' Check the documentation of _neupd. '
+            ! print *, ' '
+            ! stop
+            return
+
+         end if
+         
+      endif
+
+      ! Store the eigenvalue
+
+      sig_max = CMPLX(dr(NEV), di(NEV), KIND=RD)
+
+      ! print *,sig_max
+
+   end subroutine eigen_shift_inv
 
    ! !****
 
@@ -299,14 +565,14 @@ contains
    !    integer  :: ido
    !    integer  :: iparam(11)
    !    integer  :: ipntr(14)
-   !    real(RD) :: resid(4*(2*N+1))
-   !    real(RD) :: v(4*(2*N+1),NCV)
-   !    real(RD) :: workd(3*4*(2*N+1))
+   !    real(RD) :: resid(@{prob_size(N)}@)
+   !    real(RD) :: v(@{prob_size(N)}@,NCV)
+   !    real(RD) :: workd(3*@{prob_size(N)}@)
    !    real(RD) :: workl(LWORKL)
    !    integer  :: info
    !    real(RD) :: dr(NEV+1)
    !    real(RD) :: di(NEV+1)
-   !    real(RD) :: z(4*(2*N+1),NEV+1)
+   !    real(RD) :: z(@{prob_size(N)}@,NEV+1)
    !    real(RD) :: workev(3*NCV)
    !    logical  :: select(NCV)
    !    integer  :: ierr
@@ -326,15 +592,15 @@ contains
 
    !    iter_loop : do
 
-   !       call DNAUPD(ido, 'I', 4*(2*N+1), 'SR', NEV, TOL, resid, &
+   !       call DNAUPD(ido, 'I', @{prob_size(N)}@, 'SR', NEV, TOL, resid, &
    !          NCV, v, SIZE(v, 1), iparam, ipntr, workd, workl, LWORKL, &
    !          info)
 
    !       if (ido == -1 .OR. ido == 1) then
 
    !          associate( &
-   !             x => workd(ipntr(1):ipntr(1)+4*(2*N+1)-1), &
-   !             y => workd(ipntr(2):ipntr(2)+4*(2*N+1)-1))
+   !             x => workd(ipntr(1):ipntr(1)+@{prob_size(N)}@-1), &
+   !             y => workd(ipntr(2):ipntr(2)+@{prob_size(N)}@-1))
 
    !             call eval_prod(N, pa, x, y)
 
@@ -361,7 +627,7 @@ contains
    !    else
 
    !       call DNEUPD(.FALSE., 'A', select, dr, di, z, SIZE(z, 1), &
-   !          0._RD, 0._RD, workev, 'I', 4*(2*N+1), 'LM', NEV, TOL, &
+   !          0._RD, 0._RD, workev, 'I', @{prob_size(N)}@, 'LM', NEV, TOL, &
    !          resid, NCV, v, SIZE(v, 1), iparam, ipntr, workd, workl, &
    !          LWORKL, ierr)
 
