@@ -349,6 +349,24 @@ contains
 
    end subroutine apply_shift
 
+   pure function triple_prod(a, b, c) result(d)
+      real(RD), intent(in)           :: a(:)
+      real(RD), intent(in)           :: b(:,:)
+      real(RD), intent(in), optional :: c(:)
+
+      real(RD) :: d
+
+      ! performs the triple prod a*b*c in matrix math, where a and c are vecs, b is a matrix
+      ! if c is not present, sets c=a for a*b*a in matrix math
+
+      if (PRESENT(c)) then
+         d = DOT_PRODUCT(a, MATMUL(b, c))
+      else
+         d = DOT_PRODUCT(a, MATMUL(b, a))
+      end if
+
+   end function triple_prod
+
    subroutine eigen_shift_inv(N, pa, sig_shift, split, sig_max, info) !, NEV, NCV, LWORKL, info, ierr)
 
       integer, intent(in)        :: N
@@ -359,12 +377,12 @@ contains
       integer, intent(out)       :: info
 
       ! ARPACK parameters
-      integer, parameter   :: NEV = 1
-      integer, parameter   :: NCV = 2*NEV + 1
-      integer, parameter   :: LWORKL = 3*NCV**2 + 6*NCV
-      real(RD), parameter  :: TOL = 1E-6_RD
+      integer, parameter          :: NEV = 1
+      integer, parameter          :: NCV = 2*NEV + 1
+      integer, parameter          :: LWORKL = 3*NCV**2 + 6*NCV
+      real(RD), parameter         :: TOL = 1E-6_RD
       character(len=2), parameter :: which = 'LR'
-      character, parameter :: bmat = 'I'
+      character, parameter        :: bmat = 'I'
 
       integer  :: ido
       integer  :: iparam(11)
@@ -382,8 +400,7 @@ contains
       ! integer  :: ierr
 
       ! matrix solving variables
-      real(RD), allocatable :: A(:,:), B(:,:) ! B get's used to seperate parities if split is TRUE
-      real(RD)              :: tmp(@{prob_size(N)}@)
+      real(RD), allocatable :: A_u(:,:), A_l(:,:) ! upper and lower blocks. if not splitting, only A_u is used
       integer               :: IPIV(@{prob_size(N)}@)
       integer               :: la_info
 
@@ -406,23 +423,25 @@ contains
 
          ! use trig basis
 
-         allocate( A(@{block_size(N)}@,@{block_size(N)}@), B(@{block_size(N)}@,@{block_size(N)}@) )
+         allocate( A_u(@{block_size(N)}@, @{block_size(N)}@), A_l(@{block_size(N)}@, @{block_size(N)}@) )
 
-         call eval_matrix(N, pa, A, .true.)
-         call eval_matrix(N, pa, B, .false.)
+         call eval_matrix(N, pa, A_u, .true.)
+         call eval_matrix(N, pa, A_l, .false.)
 
          ! apply shift
-         call apply_shift(sig_shift%re, A)
-         call apply_shift(sig_shift%re, B)
+         call apply_shift(sig_shift%re, A_u)
+         call apply_shift(sig_shift%re, A_l)
 
          ! perform PLU factorization
-         call DGETRF(@{block_size(N)}@,@{block_size(N)}@, A, @{block_size(N)}@, IPIV(1:@{block_size(N)}@), la_info)
+         ! upper block
+         call DGETRF(@{block_size(N)}@,@{block_size(N)}@, A_u, @{block_size(N)}@, IPIV(1:@{block_size(N)}@), la_info)
          if (la_info /= 0) then
             print *, 'Error with PLU factorisation in first block, info = ', la_info
             stop
          end if
 
-         call DGETRF(@{block_size(N)}@,@{block_size(N)}@, B, @{block_size(N)}@, IPIV(@{block_size(N)}@+1 : @{prob_size(N)}@), la_info)
+         ! lower block
+         call DGETRF(@{block_size(N)}@,@{block_size(N)}@, A_l, @{block_size(N)}@, IPIV(@{block_size(N)}@+1 : @{prob_size(N)}@), la_info)
          if (la_info /= 0) then
             print *, 'Error with PLU factorisation in second block, info = ', la_info
             stop
@@ -432,15 +451,15 @@ contains
 
          ! use exponential basis
 
-         allocate( A(@{prob_size(N)}@, @{prob_size(N)}@) )
+         allocate( A_u(@{prob_size(N)}@, @{prob_size(N)}@) )
 
-         call eval_matrix(N, pa, A)
+         call eval_matrix(N, pa, A_u)
 
          ! apply shift
-         call apply_shift(sig_shift%re, A)
+         call apply_shift(sig_shift%re, A_u)
 
          ! perform PLU factorization
-         call DGETRF(@{prob_size(N)}@,@{prob_size(N)}@, A, @{prob_size(N)}@, IPIV, la_info)
+         call DGETRF(@{prob_size(N)}@,@{prob_size(N)}@, A_u, @{prob_size(N)}@, IPIV, la_info)
          if (la_info /= 0) then
             print *, 'Error with PLU factorisation, info = ', la_info
             stop
@@ -458,25 +477,31 @@ contains
          if (ido == -1 .OR. ido == 1) then
 
             associate( &
-               x => workd(ipntr(1):ipntr(1)+@{prob_size(N)}@-1), &
-               y => workd(ipntr(2):ipntr(2)+@{prob_size(N)}@-1))
+               x => workd(ipntr(1) : ipntr(1) + @{prob_size(N)}@ - 1), &
+               y => workd(ipntr(2) : ipntr(2) + @{prob_size(N)}@ - 1))
 
-               ! call eval_prod_full(N, pa, x, y)
+               y = x
 
-               tmp = x
-
+               ! now solve the system (A - sig_shift*I) x = y
                if (split) then
 
-                  call DGETRS('N', @{block_size(N)}@, 1, A, @{block_size(N)}@, & 
-                     IPIV(1 : @{block_size(N)}@), tmp( 1 : @{block_size(N)}@), @{block_size(N)}@, la_info)
+                  ! upper block
+                  call DGETRS('N', @{block_size(N)}@, 1, A_u, @{block_size(N)}@, & 
+                     IPIV(1 : @{block_size(N)}@), & 
+                     y( 1 : @{block_size(N)}@), &
+                     @{block_size(N)}@, la_info)
+
                   if (la_info /= 0) then
                      print *, 'Error with linear solve in first block, info = ', la_info
                      stop
                   end if
 
-                  call DGETRS('N', @{block_size(N)}@, 1, B, & 
-                     @{block_size(N)}@, IPIV(@{block_size(N)}@ + 1 : @{prob_size(N)}@), & 
-                     tmp(@{block_size(N)}@ + 1 : @{prob_size(N)}@), @{block_size(N)}@, la_info)
+                  ! lower block
+                  call DGETRS('N', @{block_size(N)}@, 1, A_l, @{block_size(N)}@, &
+                     IPIV(@{block_size(N)}@ + 1 : @{prob_size(N)}@), & 
+                     y(@{block_size(N)}@ + 1 : @{prob_size(N)}@), &
+                     @{block_size(N)}@, la_info)
+
                   if (la_info /= 0) then
                      print *, 'Error with linear solve in second block, info = ', la_info
                      stop
@@ -484,15 +509,14 @@ contains
 
                else
 
-                  call DGETRS('N', @{prob_size(N)}@, 1, A, @{prob_size(N)}@, IPIV, tmp, @{prob_size(N)}@, la_info)
+                  call DGETRS('N', @{prob_size(N)}@, 1, A_u, @{prob_size(N)}@, IPIV, y, @{prob_size(N)}@, la_info)
+
                   if (la_info /= 0) then
                      print *, 'Error with linear solve, info = ', la_info
                      stop
                   end if
 
                end if
-
-               y = tmp
 
             end associate
 
@@ -542,7 +566,56 @@ contains
 
       ! Store the eigenvalue
 
-      sig_max = CMPLX(dr(NEV), di(NEV), KIND=RD)
+      if (sig_shift%im == 0) then
+
+         sig_max = CMPLX(dr(NEV), di(NEV), KIND=RD)
+
+      else if (di(NEV) == 0) then
+
+         ! need to do special calculation, according to DNEUPD documentation
+
+         if (split) then
+
+            associate( &
+               z_u => z(1 : @{block_size(N)}@, :), &
+               z_l => z(@{block_size(N)}@ + 1 : @{prob_size(N)}@, :) )
+
+               sig_max%re = triple_prod(z_u(:, NEV), A_u) + triple_prod(z_l(:, NEV), A_l)
+
+            end associate
+
+         else
+
+            sig_max%re = triple_prod(z(:,NEV), A_u)
+
+         end if
+
+         sig_max%im = 0
+      
+      else
+
+         if (split) then
+
+            associate( &
+               z_u => z(1 : @{block_size(N)}@, :), &
+               z_l => z(@{block_size(N)}@ + 1 : @{prob_size(N)}@, :) )
+
+               sig_max%re = triple_prod(z_u(:,NEV), A_u) + triple_prod(z_u(:,NEV+1), A_u) &
+                  + triple_prod(z_l(:,NEV), A_l) + triple_prod(z_l(:,NEV+1), A_l)
+
+               sig_max%im = triple_prod(z_u(:,NEV), A_u, z_u(:,NEV+1)) - triple_prod(z_u(:,NEV+1), A_u, z_u(:,NEV)) &
+                  + triple_prod(z_l(:,NEV), A_l, z_l(:,NEV+1)) - triple_prod(z_l(:,NEV+1), A_l, z_l(:,NEV))
+
+            end associate
+
+         else
+
+            sig_max%re = triple_prod(z(:,NEV), A_u) + triple_prod(z(:,NEV+1), A_u)
+            sig_max%im = triple_prod(z(:,NEV), A_u, z(:,NEV+1)) - triple_prod(z(:,NEV+1), A_u, z(:,NEV))
+
+         end if
+
+      end if
 
       ! print *,sig_max
 
