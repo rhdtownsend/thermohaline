@@ -20,6 +20,8 @@ program thermo
    use params_m
    use matrix_m
    use finger_m
+   use LU_solver_m
+   use eig_solver_m
 
    use f95_lapack
 
@@ -151,18 +153,20 @@ program thermo
       if (i > ar_start) then
 
          call apply_arpack(N, pa, sig_max_ar(i-ar_start), split, sig_max_ar(i), info) !, resid)
+         ! call eigen_max(N, pa, sig_max_ar(i))
 
          if (info /= 0) then
             ! ARPACK failed, use the LAPACK result
             sig_max_ar(i) = sig_max_la(i)
             ar_sucess(i)  = .false.
             print *, 'ARPACK failed at index i = ', i
-            stop
+            ! stop
          else
             print *, achar(9), 'LAPACK result = ', sig_max_la(i)%re, sig_max_la(i)%im, &
                'ARPACK result = ', sig_max_ar(i)%re, sig_max_ar(i)%im
          end if
-         ! stop 
+         ! if (i == 1458) stop
+         ! stop
       else
 
          ! call RANDOM_NUMBER(resid)
@@ -245,7 +249,7 @@ contains
       type(params_t), intent(in) :: pa
       complex(RD), intent(out)   :: sig_max
 
-      integer, parameter   :: NEV = 30
+      integer, parameter   :: NEV = 25
       integer, parameter   :: NCV = 2*NEV + 1
       integer, parameter   :: LWORKL = 3*NCV**2 + 6*NCV
       real(RD), parameter  :: TOL = 1E-6_RD
@@ -266,6 +270,10 @@ contains
       real(RD) :: workev(3*NCV)
       logical  :: select(NCV)
       integer  :: ierr
+
+      real(RD) :: A(@{prob_size(N)}@,@{prob_size(N)}@)
+
+      call eval_matrix(N, pa, A)
 
       ! Find the maximal eigenvalue
 
@@ -292,7 +300,8 @@ contains
                x => workd(ipntr(1):ipntr(1)+@{prob_size(N)}@-1), &
                y => workd(ipntr(2):ipntr(2)+@{prob_size(N)}@-1))
 
-               call eval_prod_full(N, pa, x, y)
+               ! call eval_prod_full(N, pa, x, y)
+               y = MATMUL(A, x)
 
             end associate
 
@@ -315,8 +324,14 @@ contains
          stop
          ! return
 
+      ! else if (iparam(5) /= NEV) then
+      !    print *, 'NCONV does not match NEV. NCONV = ', iparam(5)
+         ! call write_matrix(A, 'failed_mtx_no_shift.txt')
+         ! stop
+
       else
 
+         if (iparam(5) /= NEV) print *, 'NCONV does not match NEV. NCONV = ', iparam(5)
          call DNEUPD(.FALSE., 'A', select, dr, di, z, SIZE(z, 1), &
             0._RD, 0._RD, workev, bmat, @{prob_size(N)}@, which, NEV, TOL, &
             resid, NCV, v, SIZE(v, 1), iparam, ipntr, workd, workl, &
@@ -357,24 +372,6 @@ contains
 
    end subroutine apply_shift
 
-   pure function triple_prod(a, b, c) result(d)
-      real(RD), intent(in)           :: a(:)
-      real(RD), intent(in)           :: b(:,:)
-      real(RD), intent(in), optional :: c(:)
-
-      real(RD) :: d
-
-      ! performs the triple prod a*b*c in matrix math, where a and c are vecs, b is a matrix
-      ! if c is not present, sets c=a for a*b*a in matrix math
-
-      if (PRESENT(c)) then
-         d = DOT_PRODUCT(a, MATMUL(b, c))
-      else
-         d = DOT_PRODUCT(a, MATMUL(b, a))
-      end if
-
-   end function triple_prod
-
    subroutine write_matrix(A, fname)
       ! writes matrix to file in row major order
       real(RD), intent(in) :: A(:,:)
@@ -389,20 +386,7 @@ contains
 
    end subroutine write_matrix
 
-   pure function max_real(sig)
-      ! function gets the element with max real part for an array of complex numbers
-      complex(RD), intent(in) :: sig(:)
-
-      complex(RD) :: max_real
-      integer :: max_real_loc
-
-      max_real_loc = MAXLOC(sig%re, 1)
-      max_real = sig(max_real_loc)
-
-   end function max_real
-
    subroutine apply_arpack(N, pa, sig_shift, split, sig_max, info)
-
       integer, intent(in)        :: N
       type(params_t), intent(in) :: pa
       complex(RD), intent(in)    :: sig_shift ! e-value shift
@@ -410,265 +394,562 @@ contains
       complex(RD), intent(out)   :: sig_max
       integer, intent(out)       :: info
 
-      real(RD), allocatable :: A(:,:) ! the matrix that we will build into
-      integer               :: sys_size
-      complex(RD)           :: sig_max_1, sig_max_2
-      logical               :: p_success, m_success ! flags for success of ARPACK
+      real(RD), allocatable         :: A(:,:), A_shifted(:,:)
+      integer                       :: sys_size, block_size
+      class(LU_solver), allocatable :: A_factored
+      type(ar_params_t)             :: ar_params
 
+      ! allocate the system
+      sys_size = @{prob_size(N)}@
+      allocate( A(sys_size,sys_size) )
+
+      ! evaluate matrices
       if (split) then
-         ! use the trig basis
-         sys_size = @{block_size(N)}@
+         block_size = @{block_size(N)}@
 
-         allocate(A(sys_size,sys_size))
+         associate( &
+            A_1 => A(1:block_size, 1:block_size), &
+            A_2 => A( block_size+1 : sys_size , block_size+1 : sys_size) &
+         )
+            @:ASSERT(SIZE(A_1,1) == block_size, 'A_1 is wrong size')
+            @:ASSERT(SIZE(A_2,1) == block_size, 'A_2 is wrong size')
 
-         ! initalize + parity
-         call eval_matrix(N, pa, A, .true.)
-         ! call write_matrix(A, 'p_parity.txt')
-         call eigen_shift_inv(A, sig_shift, sys_size, sig_max_1, info)
+            call eval_matrix(N, pa, A_1, .true.)
+            call eval_matrix(N, pa, A_2, .false.)
 
-         if (info /= 0) then
-            p_success = .false.
-            print *, 'failed on + parity'
-            stop
-            ! return
-         else
-            p_success = .true.
-         end if
-
-         ! now do - parity
-
-         call eval_matrix(N, pa, A, .false.)
-         ! call write_matrix(A, 'm_parity.txt')
-         call eigen_shift_inv(A, sig_shift, sys_size, sig_max_2, info)
-
-         if (info /= 0) then
-            m_success = .false.
-            print *, 'failed on - parity'
-            stop
-            ! return
-         else
-            m_success = .true.
-         end if
-
-         ! stop
-
-         ! now select the maximum result
-         ! if (p_success .and. m_success .and. sig_max_1%re > sig_max_2%re) then
-         !    sig_max = sig_max_1
-         if (p_success .and. m_success) then
-            sig_max = max_real([sig_max_1, sig_max_2])
-         else if (p_success) then
-            sig_max = sig_max_1
-            info = 0
-         else if (m_success) then
-            sig_max = sig_max_2
-            info = 0
-         end if
-
+         end associate
       else
-         ! exp basis
-         sys_size = @{prob_size(N)}@
-
-         allocate(A(sys_size,sys_size))
-
-         call eval_matrix(N, pa, A) ! initialize matrix
-
-         call eigen_shift_inv(A, sig_shift, sys_size, sig_max, info) ! run ARPACK
+         call eval_matrix(N, pa, A)
       end if
+
+      ! apply shift
+      A_shifted = A
+      call apply_shift(sig_shift%re, A_shifted)
+
+      ! Factor the matrix
+      if (split) then
+         allocate( block_LU_solver :: A_factored )
+
+         associate( &
+            A_1 => A_shifted(1:block_size,1:block_size), &
+            A_2 => A_shifted( block_size+1 : sys_size , block_size+1 : sys_size) &
+         )
+            A_factored = create_block_solver(A_1, A_2)
+         end associate
+      else
+         allocate( generic_LU_solver :: A_factored )
+
+         A_factored = create_generic_solver(A_shifted)
+      end if
+
+      ! set up ar params
+      call ar_params%init_params(sys_size, 10) ! set NEV to 10
+
+      call eigen_shift_inv_v3(A, sys_size, CMPLX(sig_shift%re, 0._RD, KIND=RD), &
+         A_factored, ar_params, sig_max, info)
+
 
    end subroutine apply_arpack
 
-   subroutine eigen_shift_inv(A, sig_shift, sys_size, sig_max, info)
+   ! subroutine apply_arpack(N, pa, sig_shift, split, sig_max, info)
 
-      real(RD), intent(inout)    :: A(:,:)
-      complex(RD), intent(in)    :: sig_shift ! e-value shift
-      integer, intent(in)        :: sys_size ! size of sytem, should be equal to
-      complex(RD), intent(out)   :: sig_max
-      integer, intent(out)       :: info
+   !    integer, intent(in)        :: N
+   !    type(params_t), intent(in) :: pa
+   !    complex(RD), intent(in)    :: sig_shift ! e-value shift
+   !    logical, intent(in)        :: split ! determine whether to use exp or trig basis
+   !    complex(RD), intent(out)   :: sig_max
+   !    integer, intent(out)       :: info
 
-      ! ARPACK parameters
-      integer, parameter          :: NEV = 4
-      integer, parameter          :: NCV = (2*NEV + 1) * 1
-      integer, parameter          :: LWORKL = 3*NCV**2 + 6*NCV
-      real(RD), parameter         :: TOL = 1E-12_RD
-      character(len=2), parameter :: which = 'LM'
-      character, parameter        :: bmat = 'I'
+   !    real(RD), allocatable :: A(:,:) ! the matrix that we will build into
+   !    integer               :: sys_size
+   !    complex(RD)           :: sig_max_1, sig_max_2
+   !    logical               :: p_success, m_success ! flags for success of ARPACK
 
-      integer  :: ido
-      integer  :: iparam(11)
-      integer  :: ipntr(14)
-      real(RD) :: resid(sys_size)
-      real(RD) :: v(sys_size,NCV)
-      real(RD) :: workd(3*sys_size)
-      real(RD) :: workl(LWORKL)
-      real(RD) :: dr(NEV+1)
-      real(RD) :: di(NEV+1)
-      real(RD) :: z(sys_size,NEV+1)
-      real(RD) :: workev(3*NCV)
-      logical  :: select(NCV)
+   !    if (split) then
+   !       ! use the trig basis
+   !       sys_size = @{block_size(N)}@
 
-      ! matrix solving variables
-      integer  :: IPIV(sys_size)
-      integer  :: la_info
+   !       allocate(A(sys_size,sys_size))
 
-      ! variables for final output
-      real(RD), allocatable :: A_copy(:,:) ! copy of A before any transformations are done
+   !       ! initalize + parity
+   !       call eval_matrix(N, pa, A, .true.)
+   !       ! call write_matrix(A, 'p_parity.txt')
+   !       ! call eigen_shift_inv(A, sig_shift, sys_size, sig_max_1, info)
+   !       call factor_and_solve(A, sig_shift, sys_size, sig_max_1, info)
+   !       ! print *, '+ parity result: ', sig_max_1
 
-      ! Find the maximal eigenvalue using shift-invert mode
+   !       if (info /= 0) then
+   !          p_success = .false.
+   !          print *, 'failed on + parity'
+   !          stop
+   !          ! return
+   !       else
+   !          p_success = .true.
+   !       end if
 
-      ! First set up parameters
+   !       ! now do - parity
 
-      iparam = 0
+   !       call eval_matrix(N, pa, A, .false.)
+   !       ! call write_matrix(A, 'm_parity.txt')
+   !       ! call eigen_shift_inv(A, sig_shift, sys_size, sig_max_2, info)
+   !       call factor_and_solve(A, sig_shift, sys_size, sig_max_2, info)
+   !       ! print *, '- parity result: ', sig_max_2
 
-      iparam(1) = 1
-      iparam(3) = 1000 ! max iterations
-      iparam(7) = 3 ! 3 sets to shift inver mode
+   !       if (info /= 0) then
+   !          m_success = .false.
+   !          print *, 'failed on - parity'
+   !          stop
+   !          ! return
+   !       else
+   !          m_success = .true.
+   !       end if
 
-      ido  = 0
-      info = 0 ! 0 means normal start, not 0 means giving an inital resid vector
+   !       ! stop
 
-      ! initialize these arrays
-      dr = -HUGE(dr)
-      di = -HUGE(di)
+   !       ! now select the maximum result
+   !       ! if (p_success .and. m_success .and. sig_max_1%re > sig_max_2%re) then
+   !       !    sig_max = sig_max_1
+   !       if (p_success .and. m_success) then
+   !          sig_max = max_real([sig_max_1, sig_max_2])
+   !       else if (p_success) then
+   !          sig_max = sig_max_1
+   !          info = 0
+   !       else if (m_success) then
+   !          sig_max = sig_max_2
+   !          info = 0
+   !       end if
 
-      A_copy = A ! keep a copy for later, as A will be changed by LAPACK
+   !    else
+   !       ! exp basis
+   !       sys_size = @{prob_size(N)}@
 
-      ! factor the matrix
+   !       allocate(A(sys_size,sys_size))
 
-      ! apply shift
-      call apply_shift(sig_shift%re, A)
+   !       call eval_matrix(N, pa, A) ! initialize matrix
 
-      ! perform PLU factorization
-      call DGETRF(sys_size, sys_size, A, sys_size, IPIV, la_info)
-      if (la_info /= 0) then
-         print *, 'Error with PLU factorisation, info = ', la_info
-         stop
-      end if
+   !       call eigen_shift_inv(A, sig_shift, sys_size, sig_max, info) ! run ARPACK
+   !    end if
+
+   ! end subroutine apply_arpack
+
+   ! subroutine factor_and_solve(A, sig_shift, sys_size, sig_max, info)
+   !    real(RD), intent(in)       :: A(:,:)
+   !    complex(RD), intent(in)    :: sig_shift ! e-value shift
+   !    integer, intent(in)        :: sys_size ! size of sytem, should be equal to
+   !    complex(RD), intent(out)   :: sig_max
+   !    integer, intent(out)       :: info
+
+   !    ! LAPACK variables
+   !    integer  :: IPIV(sys_size)
+   !    integer  :: la_info
+      
+   !    ! local function variables
+   !    integer :: NEV, NCV, LWORKL
+   !    logical :: NCONV_err
+   !    real(RD), allocatable :: A_LU(:,:) ! this way a copy of A is preserved
+
+   !    ! This function factors the given matrix, then calls ARPACK to get the max real part
+
+   !    A_LU = A
+
+   !    call apply_shift(sig_shift%re, A_LU)
+
+   !    ! perform PLU factorization
+   !    call DGETRF(sys_size, sys_size, A_LU, sys_size, IPIV, la_info)
+   !    if (la_info /= 0) then
+   !       print *, 'Error with PLU factorisation, info = ', la_info
+   !       stop
+   !    end if
+
+   !    ! set starting value for NEV
+   !    NEV    = 10
+   !    NCV    = (2*NEV + 1) * 1
+   !    LWORKL = 3*NCV**2 + 6*NCV
+
+   !    call eigen_shift_inv_v2(A, A_LU, sig_shift, sys_size, sig_max, info, NEV, NCV, LWORKL, IPIV, NCONV_err)
+
+   !    ! Handle the NCONV error
+   !    if (NCONV_err) then
+   !       NEV    = NEV + 1
+   !       NCV    = (2*NEV + 1) * 1
+   !       LWORKL = 3*NCV**2 + 6*NCV
+
+   !       call eigen_shift_inv_v2(A, A_LU, sig_shift, sys_size, sig_max, info, NEV, NCV, LWORKL, IPIV, NCONV_err)
+
+   !       if (NCONV_err) then
+   !          print *, 'failed again with NEV increasing :('
+   !          stop
+   !       else
+   !          print *, 'Suceeded on second attempt'
+   !       end if
+   !    end if
+
+   ! end subroutine factor_and_solve
+
+   ! subroutine eigen_shift_inv(A, sig_shift, sys_size, sig_max, info)
+
+   !    real(RD), intent(inout)    :: A(:,:)
+   !    complex(RD), intent(in)    :: sig_shift ! e-value shift
+   !    integer, intent(in)        :: sys_size ! size of sytem, should be equal to
+   !    complex(RD), intent(out)   :: sig_max
+   !    integer, intent(out)       :: info
+
+   !    ! ARPACK parameters
+   !    integer, parameter          :: NEV = 4
+   !    integer, parameter          :: NCV = (2*NEV + 1) * 1
+   !    integer, parameter          :: LWORKL = 3*NCV**2 + 6*NCV
+   !    real(RD), parameter         :: TOL = 1E-12_RD
+   !    character(len=2), parameter :: which = 'LM'
+   !    character, parameter        :: bmat = 'I'
+
+   !    integer  :: ido
+   !    integer  :: iparam(11)
+   !    integer  :: ipntr(14)
+   !    real(RD) :: resid(sys_size)
+   !    real(RD) :: v(sys_size,NCV)
+   !    real(RD) :: workd(3*sys_size)
+   !    real(RD) :: workl(LWORKL)
+   !    real(RD) :: dr(NEV+1)
+   !    real(RD) :: di(NEV+1)
+   !    real(RD) :: z(sys_size,NEV+1)
+   !    real(RD) :: workev(3*NCV)
+   !    logical  :: select(NCV)
+
+   !    ! matrix solving variables
+   !    integer  :: IPIV(sys_size)
+   !    integer  :: la_info
+
+   !    ! variables for final output
+   !    real(RD), allocatable :: A_copy(:,:) ! copy of A before any transformations are done
+
+   !    ! Find the maximal eigenvalue using shift-invert mode
+
+   !    ! First set up parameters
+
+   !    iparam = 0
+
+   !    iparam(1) = 1
+   !    iparam(3) = 1000 ! max iterations
+   !    iparam(7) = 3 ! 3 sets to shift inver mode
+
+   !    ido  = 0
+   !    info = 0 ! 0 means normal start, not 0 means giving an inital resid vector
+
+   !    ! initialize these arrays
+   !    dr = -HUGE(dr)
+   !    di = -HUGE(di)
+
+   !    A_copy = A ! keep a copy for later, as A will be changed by LAPACK
+
+   !    ! factor the matrix
+
+   !    ! apply shift
+   !    call apply_shift(sig_shift%re, A)
+
+   !    ! perform PLU factorization
+   !    call DGETRF(sys_size, sys_size, A, sys_size, IPIV, la_info)
+   !    if (la_info /= 0) then
+   !       print *, 'Error with PLU factorisation, info = ', la_info
+   !       stop
+   !    end if
 
 
-      iter_loop : do
+   !    iter_loop : do
 
-         ! call to ARPACK
-         call DNAUPD(ido, bmat, sys_size, which, NEV, TOL, resid, &
-            NCV, v, SIZE(v, 1), iparam, ipntr, workd, workl, LWORKL, &
-            info)
+   !       ! call to ARPACK
+   !       call DNAUPD(ido, bmat, sys_size, which, NEV, TOL, resid, &
+   !          NCV, v, SIZE(v, 1), iparam, ipntr, workd, workl, LWORKL, &
+   !          info)
 
-         if (ido == -1 .OR. ido == 1) then
+   !       if (ido == -1 .OR. ido == 1) then
 
-            associate( &
-               x => workd(ipntr(1) : ipntr(1) + sys_size - 1), &
-               y => workd(ipntr(2) : ipntr(2) + sys_size - 1))
+   !          associate( &
+   !             x => workd(ipntr(1) : ipntr(1) + sys_size - 1), &
+   !             y => workd(ipntr(2) : ipntr(2) + sys_size - 1))
 
-               y = x
+   !             y = x
 
-               ! now solve the system (A - sig_shift*I) x = y
-               call DGETRS('N', sys_size, 1, A, sys_size, IPIV, y, sys_size, la_info)
+   !             ! now solve the system (A - sig_shift*I) x = y
+   !             call DGETRS('N', sys_size, 1, A, sys_size, IPIV, y, sys_size, la_info)
 
-               if (la_info /= 0) then
-                  print *, 'Error with linear solve, info = ', la_info
-                  stop
-               end if
-
-
-            end associate
-
-         else
-
-            exit iter_loop
-
-         end if
-
-      end do iter_loop
-
-      ! print *, 'Finished iteration, num itrs = ', iparam(3)
-      ! print *, 'number of OPs = ', iparam(9)
-
-      ! Check for convergence
-
-      if (info /= 0) then
-
-         ! print *, ' '
-         ! print *, ' Error with _naupd, info = ', info
-         ! print *, ' Check the documentation of _naupd'
-         ! print *, ' '
-         ! stop
-         return
-
-      else if (iparam(5) /= NEV) then
-         ! note: it seems to be finding 2 eigenvalues when it should only be hitting 1
-         print *, 'NCONV does not match NEV. NCONV = ', iparam(5)
-         call write_matrix(A_copy, 'failed_mat.txt')
-         ! print *, 'IDO', ido
-         ! print *, 'sys_size', sys_size
-         print *, 'sig_shift', sig_shift
-         ! print *, 'info', info
-         ! print *, 'Iparam', iparam
-         ! stop
-         info = 100
-         ! return
-      end if
-         ! print *, 'CALLING DNEUPD'
-
-      call DNEUPD(.TRUE., 'A', select, dr, di, z, SIZE(z, 1), &
-         sig_shift%re, sig_shift%im, workev, bmat, sys_size, which, NEV, TOL, &
-         resid, NCV, v, SIZE(v, 1), iparam, ipntr, workd, workl, &
-         LWORKL, info)
-      ! print *, 'FINISHED CALL'
-
-      if (info /= 0) then
-
-         ! print *, ' '
-         ! print *, ' Error with _neupd, info = ', info
-         ! print *, ' Check the documentation of _neupd. '
-         ! print *, ' '
-         ! stop
-         return
-
-      end if
-
-      ! Store the eigenvalue
-
-      if (sig_shift%im /= 0) then
-
-         ! need to do special calculation, according to DNEUPD
+   !             if (la_info /= 0) then
+   !                print *, 'Error with linear solve, info = ', la_info
+   !                stop
+   !             end if
 
 
-         eval_correction : block
-            integer :: i
-            logical :: conjugate_flag
+   !          end associate
 
-            conjugate_flag = .false.
+   !       else
 
-            do i = 1, NEV
+   !          exit iter_loop
 
-               if (conjugate_flag) then
+   !       end if
 
-                  ! last cycle we hit a complex conjugate
-                  dr(i) = dr(i-1)
-                  di(i) = -di(i-1)
-                  conjugate_flag = .false.
+   !    end do iter_loop
 
-               else if (di(i) == 0) then
+   !    ! print *, 'Finished iteration, num itrs = ', iparam(3)
+   !    ! print *, 'number of OPs = ', iparam(9)
 
-                  dr(i) = triple_prod(z(:,i), A_copy)
+   !    ! Check for convergence
 
-               else
+   !    if (info /= 0) then
 
-                  ! we have a complex conjugate pair
-                  dr(i) = triple_prod(z(:,i), A_copy) + triple_prod(z(:,i+1), A_copy)
-                  di(i) = triple_prod(z(:,i), A_copy, z(:,i+1)) - triple_prod(z(:,i+1), A_copy, z(:,i))
-                  conjugate_flag = .true.
+   !       ! print *, ' '
+   !       ! print *, ' Error with _naupd, info = ', info
+   !       ! print *, ' Check the documentation of _naupd'
+   !       ! print *, ' '
+   !       ! stop
+   !       return
 
-               end if
-            end do
-         end block eval_correction
-      end if
+   !    else if (iparam(5) /= NEV) then
+   !       ! note: it seems to be finding 2 eigenvalues when it should only be hitting 1
+   !       print *, 'NCONV does not match NEV. NCONV = ', iparam(5)
+   !       call write_matrix(A_copy, 'failed_mat.txt')
+   !       ! print *, 'IDO', ido
+   !       ! print *, 'sys_size', sys_size
+   !       print *, 'sig_shift', sig_shift
+   !       ! print *, 'info', info
+   !       ! print *, 'Iparam', iparam
+   !       ! stop
+   !       info = 100
+   !       ! return
+   !    end if
+   !       ! print *, 'CALLING DNEUPD'
 
-      sig_max = max_real(CMPLX(dr, di, KIND=RD))
+   !    call DNEUPD(.TRUE., 'A', select, dr, di, z, SIZE(z, 1), &
+   !       sig_shift%re, sig_shift%im, workev, bmat, sys_size, which, NEV, TOL, &
+   !       resid, NCV, v, SIZE(v, 1), iparam, ipntr, workd, workl, &
+   !       LWORKL, info)
+   !    ! print *, 'FINISHED CALL'
 
-      ! print *,sig_max
+   !    if (info /= 0) then
 
-   end subroutine eigen_shift_inv
+   !       ! print *, ' '
+   !       ! print *, ' Error with _neupd, info = ', info
+   !       ! print *, ' Check the documentation of _neupd. '
+   !       ! print *, ' '
+   !       ! stop
+   !       return
+
+   !    end if
+
+   !    ! Store the eigenvalue
+
+   !    if (sig_shift%im /= 0) then
+
+   !       ! need to do special calculation, according to DNEUPD
+
+
+   !       eval_correction : block
+   !          integer :: i
+   !          logical :: conjugate_flag
+
+   !          conjugate_flag = .false.
+
+   !          do i = 1, NEV
+
+   !             if (conjugate_flag) then
+
+   !                ! last cycle we hit a complex conjugate
+   !                dr(i) = dr(i-1)
+   !                di(i) = -di(i-1)
+   !                conjugate_flag = .false.
+
+   !             else if (di(i) == 0) then
+
+   !                dr(i) = triple_prod(z(:,i), A_copy)
+
+   !             else
+
+   !                ! we have a complex conjugate pair
+   !                @:ASSERT_DEBUG(di(i) == -di(i+1), 'found e-value is not a complex conjugate')
+   !                dr(i) = triple_prod(z(:,i), A_copy) + triple_prod(z(:,i+1), A_copy)
+   !                di(i) = triple_prod(z(:,i), A_copy, z(:,i+1)) - triple_prod(z(:,i+1), A_copy, z(:,i))
+   !                conjugate_flag = .true.
+
+   !             end if
+   !          end do
+   !       end block eval_correction
+   !    end if
+
+   !    sig_max = max_real(CMPLX(dr, di, KIND=RD))
+
+   !    ! print *,sig_max
+
+   ! end subroutine eigen_shift_inv
+
+   ! subroutine eigen_shift_inv_v2(A, A_LU, sig_shift, sys_size, sig_max, info, NEV, NCV, LWORKL, IPIV, NCONV_err)
+
+   !    real(RD), intent(in)       :: A(:,:)
+   !    real(RD), intent(inout)    :: A_LU(:,:)
+   !    complex(RD), intent(in)    :: sig_shift ! e-value shift
+   !    integer, intent(in)        :: sys_size ! size of sytem, should be equal to
+   !    complex(RD), intent(out)   :: sig_max
+   !    integer, intent(out)       :: info
+   !    integer, intent(in)        :: NEV
+   !    integer, intent(in)        :: NCV
+   !    integer, intent(in)        :: LWORKL
+   !    integer, intent(inout)     :: IPIV(:)
+   !    logical, intent(out)       :: NCONV_err
+
+   !    ! ARPACK parameters
+   !    real(RD), parameter         :: TOL = 1E-12_RD
+   !    character(len=2), parameter :: which = 'LM'
+   !    character, parameter        :: bmat = 'I'
+
+   !    integer  :: ido
+   !    integer  :: iparam(11)
+   !    integer  :: ipntr(14)
+   !    real(RD) :: resid(sys_size)
+   !    real(RD) :: v(sys_size,NCV)
+   !    real(RD) :: workd(3*sys_size)
+   !    real(RD) :: workl(LWORKL)
+   !    real(RD) :: dr(NEV+1)
+   !    real(RD) :: di(NEV+1)
+   !    real(RD) :: z(sys_size,NEV+1)
+   !    real(RD) :: workev(3*NCV)
+   !    logical  :: select(NCV)
+
+   !    ! matrix solving variables
+   !    integer  :: la_info
+
+   !    @:ASSERT_DEBUG(SIZE(IPIV) == sys_size)
+
+   !    ! Find the maximal eigenvalue using shift-invert mode
+
+   !    ! First set up parameters
+
+   !    iparam = 0
+
+   !    iparam(1) = 1
+   !    iparam(3) = 1000 ! max iterations
+   !    iparam(7) = 3 ! 3 sets to shift inver mode
+
+   !    ido  = 0
+   !    info = 0 ! 0 means normal start, not 0 means giving an inital resid vector
+
+   !    ! initialize these arrays
+   !    dr = -HUGE(dr)
+   !    di = -HUGE(di)
+
+   !    NCONV_err = .false.
+
+   !    iter_loop : do
+
+   !       ! call to ARPACK
+   !       call DNAUPD(ido, bmat, sys_size, which, NEV, TOL, resid, &
+   !          NCV, v, SIZE(v, 1), iparam, ipntr, workd, workl, LWORKL, &
+   !          info)
+
+   !       if (ido == -1 .OR. ido == 1) then
+
+   !          associate( &
+   !             x => workd(ipntr(1) : ipntr(1) + sys_size - 1), &
+   !             y => workd(ipntr(2) : ipntr(2) + sys_size - 1))
+
+   !             y = x
+
+   !             ! now solve the system (A - sig_shift*I) x = y
+   !             call DGETRS('N', sys_size, 1, A_LU, sys_size, IPIV, y, sys_size, la_info)
+
+   !             if (la_info /= 0) then
+   !                print *, 'Error with linear solve, info = ', la_info
+   !                stop
+   !             end if
+
+
+   !          end associate
+
+   !       else
+
+   !          exit iter_loop
+
+   !       end if
+
+   !    end do iter_loop
+
+   !    ! print *, 'Finished iteration, num itrs = ', iparam(3)
+   !    ! print *, 'number of OPs = ', iparam(9)
+
+   !    ! Check for convergence
+
+   !    if (info /= 0) then
+
+   !       ! print *, ' '
+   !       ! print *, ' Error with _naupd, info = ', info
+   !       ! print *, ' Check the documentation of _naupd'
+   !       ! print *, ' '
+   !       ! stop
+   !       return
+
+   !    else if (iparam(5) /= NEV) then
+   !       ! note: it seems to be finding 2 eigenvalues when it should only be hitting 1
+   !       print *, 'NCONV does not match NEV. NCONV = ', iparam(5)
+   !       NCONV_err = .true.
+   !       return
+   !    end if
+
+   !    call DNEUPD(.TRUE., 'A', select, dr, di, z, SIZE(z, 1), &
+   !       sig_shift%re, sig_shift%im, workev, bmat, sys_size, which, NEV, TOL, &
+   !       resid, NCV, v, SIZE(v, 1), iparam, ipntr, workd, workl, &
+   !       LWORKL, info)
+
+   !    if (info /= 0) then
+
+   !       ! print *, ' '
+   !       ! print *, ' Error with _neupd, info = ', info
+   !       ! print *, ' Check the documentation of _neupd. '
+   !       ! print *, ' '
+   !       ! stop
+   !       return
+
+   !    end if
+
+   !    ! Store the eigenvalue
+
+   !    if (sig_shift%im /= 0) then
+
+   !       ! need to do special calculation, according to DNEUPD
+
+
+   !       eval_correction : block
+   !          integer :: i
+   !          logical :: conjugate_flag
+
+   !          conjugate_flag = .false.
+
+   !          do i = 1, NEV
+
+   !             if (conjugate_flag) then
+
+   !                ! last cycle we hit a complex conjugate
+   !                dr(i) = dr(i-1)
+   !                di(i) = -di(i-1)
+   !                conjugate_flag = .false.
+
+   !             else if (di(i) == 0) then
+
+   !                dr(i) = triple_prod(z(:,i), A)
+
+   !             else
+
+   !                ! we have a complex conjugate pair
+   !                @:ASSERT_DEBUG(di(i) == -di(i+1), 'found e-val is not a complex conj')
+   !                dr(i) = triple_prod(z(:,i), A) + triple_prod(z(:,i+1), A)
+   !                di(i) = triple_prod(z(:,i), A, z(:,i+1)) - triple_prod(z(:,i+1), A, z(:,i))
+   !                conjugate_flag = .true.
+
+   !             end if
+   !          end do
+   !       end block eval_correction
+   !    end if
+
+   !    ! print *, 'Results: ', CMPLX(dr, di, KIND=RD)
+
+   !    sig_max = max_real(CMPLX(dr, di, KIND=RD))
+
+   ! end subroutine eigen_shift_inv_v2
 
    ! !****
 

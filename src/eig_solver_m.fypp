@@ -1,0 +1,262 @@
+#:include 'forum.inc'
+
+module eig_solver_m
+
+    ! uses
+    use forum_m, split_ => split
+    use ISO_FORTRAN_ENV
+    use LU_solver_m
+
+    implicit none
+
+    type ar_params_t
+        ! class for holding all the varied arpack parameters
+        integer :: NEV, NCV, LWORKL
+        real(RD), allocatable :: v(:,:), workl(:), dr(:), di(:), z(:,:), workev(:)
+        logical, allocatable :: select(:)
+    contains
+        procedure :: init_params
+        procedure :: destruct
+    end type ar_params_t
+
+    private
+
+    public :: ar_params_t, init_params, max_real, triple_prod, eigen_shift_inv_v3
+
+contains
+
+    subroutine init_params(self, sys_size, NEV, NCV)
+        class(ar_params_t), intent(inout) :: self
+        integer, intent(in)               :: sys_size
+        integer, intent(in)               :: NEV
+        integer, intent(in), optional     :: NCV
+        
+        call self%destruct ! clear allocations if we are re-initializing
+
+        ! now set the variables
+        self%NEV = NEV
+
+        if (PRESENT(NCV)) then
+            @:ASSERT(NCV > NEV, "Invalid value of NCV. NCV must be greater than NEV")
+            self%NCV = NCV
+        else
+            self%NCV = 2*NEV + 1
+        end if
+
+        self%LWORKL = 3*self%NCV**2 + 6*self%NCV
+
+        ! allocations
+        allocate( &
+            self%v(sys_size,self%NCV), &
+            self%workl(self%LWORKL), &
+            self%dr(NEV+1), &
+            self%di(NEV+1), &
+            self%z(sys_size,NEV+1), &
+            self%workev(3*self%NCV), &
+            self%select(self%NCV) &
+        )
+
+        ! initializations
+        self%v      = 0._RD
+        self%workl  = 0._RD
+        self%dr     = -HUGE(self%dr)
+        self%di     = -HUGE(self%di)
+        self%z      = 0._RD
+        self%workev = 0._RD
+
+    end subroutine init_params
+
+    subroutine destruct(self)
+        class(ar_params_t), intent(inout) :: self
+
+        if (allocated(self%v)) deallocate( self%v, self%workl, self%dr, self%di, &
+            self%z, self%workev, self%select )
+
+    end subroutine destruct
+
+    pure function triple_prod(a, b, c) result(d)
+        real(RD), intent(in)           :: a(:)
+        real(RD), intent(in)           :: b(:,:)
+        real(RD), intent(in), optional :: c(:)
+
+        real(RD) :: d
+
+        ! performs the triple prod a*b*c in matrix math, where a and c are vecs, b is a matrix
+        ! if c is not present, sets c=a for a*b*a in matrix math
+
+        if (PRESENT(c)) then
+            d = DOT_PRODUCT(a, MATMUL(b, c))
+        else
+            d = DOT_PRODUCT(a, MATMUL(b, a))
+        end if
+
+    end function triple_prod
+
+    pure function max_real(sig)
+        ! function gets the element with max real part for an array of complex numbers
+        complex(RD), intent(in) :: sig(:)
+
+        complex(RD) :: max_real
+        integer :: max_real_loc
+
+        max_real_loc = MAXLOC(sig%re, 1)
+        max_real = sig(max_real_loc)
+
+    end function max_real
+
+    subroutine eigen_shift_inv_v3(A, sys_size, sig_shift, A_LU, ar_params, sig_max, info)
+
+        real(RD), intent(in)             :: A(:,:) ! A should be the unshifted matrix
+        integer, intent(in)              :: sys_size ! size of sytem, should be equal to
+        complex(RD), intent(in)          :: sig_shift ! e-value shift
+        class(LU_solver), intent(inout)  :: A_LU
+        type(ar_params_t), intent(inout) :: ar_params
+        complex(RD), intent(out)         :: sig_max
+        integer, intent(out)             :: info
+
+        ! ARPACK parameters
+        real(RD), parameter         :: TOL = 1E-12_RD
+        character(len=2), parameter :: which = 'LM'
+        character, parameter        :: bmat = 'I'
+
+        integer  :: ido
+        integer  :: iparam(11)
+        integer  :: ipntr(14)
+        real(RD) :: resid(sys_size)
+        real(RD) :: workd(3*sys_size)
+
+        associate( &
+            NEV    => ar_params%NEV, &
+            NCV    => ar_params%NCV, &
+            LWORKL => ar_params%LWORKL, &
+            v      => ar_params%v, &
+            workl  => ar_params%workl, &
+            dr     => ar_params%dr, &
+            di     => ar_params%di, &
+            z      => ar_params%z, &
+            workev => ar_params%workev, &
+            select => ar_params%select &
+        )
+
+            ! Find the maximal eigenvalue using shift-invert mode
+
+            ! First set up parameters
+
+            iparam = 0
+
+            iparam(1) = 1
+            iparam(3) = 1000 ! max iterations
+            iparam(7) = 3 ! 3 sets to shift inver mode
+
+            ido  = 0
+            info = 0 ! 0 means normal start, not 0 means giving an inital resid vector
+
+            ! NCONV_err = .false.
+
+            iter_loop : do
+
+                ! call to ARPACK
+                call DNAUPD(ido, bmat, sys_size, which, NEV, TOL, resid, &
+                    NCV, v, SIZE(v, 1), iparam, ipntr, workd, workl, LWORKL, &
+                    info)
+
+                if (ido == -1 .OR. ido == 1) then
+
+                    associate( &
+                        x => workd(ipntr(1) : ipntr(1) + sys_size - 1), &
+                        y => workd(ipntr(2) : ipntr(2) + sys_size - 1))
+
+                        ! now solve the system (A - sig_shift*I) x = y
+                        call A_LU%solve(x, y)
+
+                    end associate
+
+                else
+
+                    exit iter_loop
+
+                end if
+
+            end do iter_loop
+
+            ! print *, 'Finished iteration, num itrs = ', iparam(3)
+            ! print *, 'number of OPs = ', iparam(9)
+
+            ! Check for convergence
+
+            if (info /= 0) then
+
+                ! print *, ' '
+                ! print *, ' Error with _naupd, info = ', info
+                ! print *, ' Check the documentation of _naupd'
+                ! print *, ' '
+                ! stop
+                return
+
+            else if (iparam(5) /= NEV) then
+                ! note: it seems to be finding 2 eigenvalues when it should only be hitting 1
+                print *, 'NCONV does not match NEV. NCONV = ', iparam(5)
+                ! NCONV_err = .true.
+                ! return
+            end if
+
+            call DNEUPD(.TRUE., 'A', select, dr, di, z, SIZE(z, 1), &
+                sig_shift%re, sig_shift%im, workev, bmat, sys_size, which, NEV, TOL, &
+                resid, NCV, v, SIZE(v, 1), iparam, ipntr, workd, workl, &
+                LWORKL, info)
+
+            if (info /= 0) then
+
+                ! print *, ' '
+                ! print *, ' Error with _neupd, info = ', info
+                ! print *, ' Check the documentation of _neupd. '
+                ! print *, ' '
+                ! stop
+                return
+
+            end if
+
+            ! Store the eigenvalue
+
+            if (sig_shift%im /= 0) then
+
+                ! need to do special calculation, according to DNEUPD
+
+                eval_correction : block
+                    integer :: i
+                    logical :: conjugate_flag
+
+                    conjugate_flag = .false.
+
+                    do i = 1, NEV
+
+                        if (conjugate_flag) then
+
+                        ! last cycle we hit a complex conjugate
+                        dr(i) = dr(i-1)
+                        di(i) = -di(i-1)
+                        conjugate_flag = .false.
+
+                        else if (di(i) == 0) then
+
+                            dr(i) = triple_prod(z(:,i), A)
+
+                        else
+
+                            ! we have a complex conjugate pair
+                            @:ASSERT_DEBUG(di(i) == -di(i+1), 'found e-val is not a complex conj')
+                            dr(i) = triple_prod(z(:,i), A) + triple_prod(z(:,i+1), A)
+                            di(i) = triple_prod(z(:,i), A, z(:,i+1)) - triple_prod(z(:,i+1), A, z(:,i))
+                            conjugate_flag = .true.
+
+                        end if
+                    end do
+                end block eval_correction
+            end if
+
+            sig_max = max_real(CMPLX(dr, di, KIND=RD))
+
+        end associate
+    end subroutine eigen_shift_inv_v3
+
+end module eig_solver_m

@@ -1,0 +1,143 @@
+#:include 'forum.inc'
+
+module LU_solver_m
+
+    ! uses
+    use forum_m, split_ => split
+    use f95_lapack
+    use ISO_FORTRAN_ENV
+
+    ! No implicit typing
+
+    implicit none
+
+    ! solver type
+
+    type, abstract :: LU_solver
+    contains
+        procedure(solve_interface), deferred  :: solve ! will solve Ax=y for x given y
+    end type LU_solver
+
+    ! interface
+    abstract interface
+        subroutine solve_interface(self, x, y)
+            import LU_solver, RD
+            class(LU_solver), intent(in) :: self
+            real(RD), intent(in)  :: x(:)
+            real(RD), intent(out) :: y(:)
+        end subroutine solve_interface
+    end interface
+
+    type, extends(LU_solver) :: generic_LU_solver
+        integer               :: sys_size
+        integer, allocatable  :: IPIV(:)
+        real(RD), allocatable :: LU(:,:) ! Holds the LU factorisation
+    contains
+        procedure :: factor => generic_factor
+        procedure :: solve  => generic_solve
+    end type generic_LU_solver
+
+    type, extends(LU_solver) :: block_LU_solver
+        integer :: sys_size
+        type(generic_LU_solver) :: block_1, block_2
+    contains
+        ! procedure :: factor => block_factor
+        procedure :: solve => block_solve
+    end type block_LU_solver
+    
+contains
+
+    function create_generic_solver(A) result(LU)
+        ! return the solver object
+        real(RD), intent(in) :: A(:,:)
+
+        type(generic_LU_solver) :: LU
+
+        integer :: i
+
+        @:ASSERT_DEBUG(SIZE(A,1) == SIZE(A,2), "invalid array dimensions when creating solver")
+
+        LU%sys_size = SIZE(A,1)
+        LU%IPIV     = [(0, i = 1,SIZE(A,1))] ! initialized to 0
+        LU%LU       = A
+
+        call LU%factor
+
+    end function create_generic_solver
+
+    function create_block_solver(A_1, A_2) result(block_LU)
+        real(RD), intent(in) :: A_1(:,:), A_2(:,:)
+
+        type(block_LU_solver) :: block_LU
+
+        type(generic_LU_solver) :: block_1, block_2
+
+        block_1 = create_generic_solver(A_1)
+        block_2 = create_generic_solver(A_2)
+
+        block_LU%sys_size = SIZE(A_1,1) + SIZE(A_2,1)
+        block_LU%block_1 = block_1
+        block_LU%block_2 = block_2
+
+    end function create_block_solver
+
+    subroutine generic_factor(self)
+        class(generic_LU_solver), intent(inout) :: self
+        
+        integer :: la_info
+
+        ! perform PLU factorization
+        call DGETRF(self%sys_size, self%sys_size, self%LU, self%sys_size, self%IPIV, la_info)
+
+        if (la_info /= 0) then
+            print *, 'Error with PLU factorisation, info = ', la_info
+            stop
+        end if
+
+    end subroutine generic_factor
+
+    subroutine generic_solve(self, x, y)
+        class(generic_LU_solver), intent(in) :: self
+        real(RD), intent(in)  :: x(:)
+        real(RD), intent(out) :: y(:)
+
+        integer :: la_info
+
+        ! put x into y for LAPACK
+        y = x
+
+        ! now solve the system Ax=y, where A has been LU factored
+        call DGETRS('N', self%sys_size, 1, self%LU, self%sys_size, self%IPIV, y, self%sys_size, la_info)
+
+        if (la_info /= 0) then
+            print *, 'Error with linear solve, info = ', la_info
+            stop
+        end if
+
+    end subroutine generic_solve
+
+    subroutine block_solve(self, x, y)
+        class(block_LU_solver), intent(in) :: self
+        real(RD), intent(in)  :: x(:)
+        real(RD), intent(out) :: y(:)
+
+        @:ASSERT_DEBUG(SIZE(x) == self%sys_size, 'size of x does not match system')
+
+        associate( &
+            x_1 => x(1:self%block_1%sys_size), &
+            y_1 => y(1:self%block_1%sys_size), &
+            x_2 => x(self%block_1%sys_size + 1 : self%block_1%sys_size + self%block_2%sys_size), &
+            y_2 => y(self%block_1%sys_size + 1 : self%block_1%sys_size + self%block_2%sys_size) &
+        )
+            
+            @:ASSERT(SIZE(x_1) + SIZE(x_2) == self%sys_size, 'messed up array sizes in block solver')
+
+            call self%block_1%solve(x_1, y_1)
+            call self%block_2%solve(x_2, y_2)
+
+        end associate
+
+    end subroutine block_solve
+
+
+end module LU_solver_m
