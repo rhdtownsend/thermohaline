@@ -1,19 +1,6 @@
 # File     : Makefile
 # Purpose  : makefile for build subdir
 
-# Enable debugging (with a performance penalty)
-DEBUG ?= no
-
-# Enable OpenMP parallelization
-OMP ?= yes
-
-# Enable FPE checks
-FPE ?= yes
-
-############ DO NOT EDIT BELOW THIS LINE ############
-### (unless you think you know what you're doing) ###
-#####################################################
-
 # Targets
 
 BIN_TARGETS = thermo
@@ -24,14 +11,18 @@ BIN_TARGETS = thermo
 # xxx_USES = source files providing modules USE'd by xxx
 # xxx_LIBS = library files required to link xxx
 
-thermo_SRCS = thermo.fypp params_m.fypp matrix_m.fypp finger_m.fypp parasite_model_matrices.f90
+thermo_SRCS = thermo.fypp params_m.fypp matrix_m.fypp finger_m.fypp parasite_model_matrices.fypp
 thermo_USES = 
 thermo_LIBS = 
 
-# Directories
+# Build flags
 
-SRC_DIRS = ../src ../src/forum/include
+FFLAGS = -I$(FORUM_INC_DIR)
 
-# Additional rules
+FPPFLAGS = -I$(FORUM_INC_DIR)
+
+LDFLAGS = `lapack_link` `hdf5_link` `lapack95_link` -L$(FORUM_LIB_DIR) -lforum
+
+# Include standard rules
 
 include Make.inc
