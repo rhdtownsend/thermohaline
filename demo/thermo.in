@@ -7,9 +7,9 @@
   rescale_scan_var_min = .true. ! Rescale scan_var_min by l_f (if scan_var_name is 'k_z')
   rescale_scan_var_max = .true. ! Rescale scan_var_min by l_f (if scan_var_name is 'k_z')
   N = 8                         ! Maximum horizontal harmonic in modal expansion
-  R0 = 8e6                      ! Density ratio
+  R_0 = 8e6                     ! Density ratio
   Pr = 1e-6                     ! Prandtl number
-  tau = 1e-7                    ! tau number
+  tau = 1e-7                    ! Composition/heat diffusivity ratio
   H_B = 1e-7                    ! Field strength
   D_B = 1e-5                    ! Field diffusivity
   w_f = 0.00044                 ! Dimensionless flow speed (ignored when scan_var_name is 'w_f')

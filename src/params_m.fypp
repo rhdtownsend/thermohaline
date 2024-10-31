@@ -16,7 +16,7 @@ module params_m
    ! Derived-type definitions
 
    type params_t
-      real(RD) :: R0    ! Density ratio
+      real(RD) :: R_0   ! Density ratio
       real(RD) :: Pr    ! Prandtl number
       real(RD) :: tau   ! Inverse Lewis number
       real(RD) :: H_B   ! Lorentz-force strength
@@ -44,9 +44,9 @@ module params_m
 
 contains
 
-   function params_t_(R0, Pr, tau, H_B, D_B, w_f, k_z) result(pa)
+   function params_t_(R_0, Pr, tau, H_B, D_B, w_f, k_z) result(pa)
 
-      real(RD), intent(in) :: R0
+      real(RD), intent(in) :: R_0
       real(RD), intent(in) :: Pr
       real(RD), intent(in) :: tau
       real(RD), intent(in) :: H_B
@@ -57,7 +57,7 @@ contains
 
       ! Store parameters
 
-      pa%R0 = R0
+      pa%R_0 = R_0
       pa%Pr = Pr
       pa%tau = tau
 
@@ -77,11 +77,11 @@ contains
          E_T => pa%E_T,     &
          E_C => pa%E_C)
       
-         call solve_finger(R0, Pr, tau, lam_f, l_f)
+         call solve_finger(R_0, Pr, tau, lam_f, l_f)
 
          E_psi = w_f/(2*l_f)
          E_T   = -l_f*E_psi/(lam_f + l_f**2)
-         E_C   = -l_f*E_psi/(R0*(lam_f + tau*l_f**2))
+         E_C   = -l_f*E_psi/(R_0*(lam_f + tau*l_f**2))
 
       end associate
 

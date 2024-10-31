@@ -42,7 +42,7 @@ contains
 
       associate( &
          Pr => pa%Pr,       &
-         R0 => pa%R0,       &
+         R_0 => pa%R_0,     &
          tau => pa%tau,     &
          k_z => pa%k_z,     &
          H_B => pa%H_B,     &
@@ -67,7 +67,7 @@ contains
             B(2,3) = 0
             B(2,4) = 0
 
-            B(3,1) = -m*l_f/R0
+            B(3,1) = -m*l_f/R_0
             B(3,2) = 0
             B(3,3) = -tau*k2_m
             B(3,4) = 0
@@ -126,7 +126,7 @@ contains
 
       associate( &
          Pr => pa%Pr,       &
-         R0 => pa%R0,       &
+         R_0 => pa%R_0,       &
          tau => pa%tau,     &
          k_z => pa%k_z,     &
          H_B => pa%H_B,     &
@@ -193,7 +193,7 @@ contains
 
       associate( &
          Pr => pa%Pr,       &
-         R0 => pa%R0,       &
+         R_0 => pa%R_0,       &
          tau => pa%tau,     &
          k_z => pa%k_z,     &
          H_B => pa%H_B,     &
@@ -264,12 +264,12 @@ contains
       if (use_mesa_) then
          if (PRESENT(parity)) then
             if (parity) then
-               call build_parasite_matrix(pa%w_f, pa%k_z, pa%Pr, pa%tau, pa%R0, pa%H_B, pa%D_B, pa%lam_f, pa%l_f, N, L, 'EVEN')
+               call build_parasite_matrix(pa%w_f, pa%k_z, pa%Pr, pa%tau, pa%R_0, pa%H_B, pa%D_B, pa%lam_f, pa%l_f, N, L, 'EVEN')
             else
-               call build_parasite_matrix(pa%w_f, pa%k_z, pa%Pr, pa%tau, pa%R0, pa%H_B, pa%D_B, pa%lam_f, pa%l_f, N, L, 'ODD')
+               call build_parasite_matrix(pa%w_f, pa%k_z, pa%Pr, pa%tau, pa%R_0, pa%H_B, pa%D_B, pa%lam_f, pa%l_f, N, L, 'ODD')
             end if
          else
-            call build_parasite_matrix(pa%w_f, pa%k_z, pa%Pr, pa%tau, pa%R0, pa%H_B, pa%D_B, pa%lam_f, pa%l_f, N, L)
+            call build_parasite_matrix(pa%w_f, pa%k_z, pa%Pr, pa%tau, pa%R_0, pa%H_B, pa%D_B, pa%lam_f, pa%l_f, N, L)
          end if
          A = L
       else

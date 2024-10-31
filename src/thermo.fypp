@@ -29,7 +29,7 @@ program thermo
    logical                  :: log_scan_var
    logical                  :: rescale_scan_var_min
    logical                  :: rescale_scan_var_max
-   real(RD)                 :: R0
+   real(RD)                 :: R_0
    real(RD)                 :: Pr
    real(RD)                 :: tau
    real(RD)                 :: H_B
@@ -57,7 +57,7 @@ program thermo
    namelist /params/ &
       scan_var_name, scan_var_min, scan_var_max, n_scan_var, log_scan_var, &
       rescale_scan_var_min, rescale_scan_var_max, &
-      R0, Pr, tau, H_B, D_B, w_f, k_z, &
+      R_0, Pr, tau, H_B, D_B, w_f, k_z, &
       N, split, use_mesa, partition, &
       out_file
 
@@ -76,7 +76,7 @@ program thermo
    rescale_scan_var_min = .FALSE.
    rescale_scan_var_max = .FALSE.
 
-   R0 = 1.
+   R_0 = 1.
    Pr = 1.
    tau = 1.
    Pr = 1.
@@ -94,17 +94,17 @@ program thermo
    read(unit, NML=params)
    close(unit)
 
-   print *,'R0  :', R0
-   print *,'Pr  :', Pr
-   print *,'tau :', tau
-   print *,'H_B :', H_B
-   print *,'D_B :', D_B
-   print *,'w_f :', w_f
-   print *,'k_z :', k_z
+   print *,'R_0   :', R_0
+   print *,'Pr    :', Pr
+   print *,'tau   :', tau
+   print *,'H_B   :', H_B
+   print *,'D_B   :', D_B
+   print *,'w_f   :', w_f
+   print *,'k_z   :', k_z
 
    ! Solve for fingering-instability parameters
 
-   call solve_finger(R0, Pr, tau, lam_f, l_f)
+   call solve_finger(R_0, Pr, tau, lam_f, l_f)
 
    print *,'lam_f :', lam_f
    print *,'l_f   :', l_f
@@ -152,7 +152,7 @@ program thermo
             scan_var(i) = (k_z_min*(n_scan_var-i) + k_z_max*(i-1))/(n_scan_var - 1)
          endif
 
-         pa = params_t(R0, Pr, tau, H_B, D_B, w_f, scan_var(i))
+         pa = params_t(R_0, Pr, tau, H_B, D_B, w_f, scan_var(i))
 
       case('w_f')
       
@@ -162,7 +162,7 @@ program thermo
             scan_var(i) = (w_f_min*(n_scan_var-i) + w_f_max*(i-1))/(n_scan_var - 1)
          endif
 
-         pa = params_t(R0, Pr, tau, H_B, D_B, scan_var(i), k_z)
+         pa = params_t(R_0, Pr, tau, H_B, D_B, scan_var(i), k_z)
 
       end select
 
@@ -177,12 +177,19 @@ program thermo
 
    hi = hdf5io_t(out_file, CREATE_FILE)
 
-   call hi%write_attr('scan_var_name', scan_var_name)
+   call hi%write_attr('R_0', R_0)
+   call hi%write_attr('Pr', Pr)
+   call hi%write_attr('tau', tau)
+   call hi%write_attr('H_B', H_B)
+   call hi%write_attr('D_B', D_B)
+
+   if (scan_var_name /= 'k_z') call hi%write_attr('k_z', k_z)
+   if (scan_var_name /= 'w_f') call hi%write_attr('w_f', w_f)
 
    call hi%write_attr('lam_f', lam_f)
    call hi%write_attr('l_f', l_f)
 
-   call hi%write_dset('scan_var', scan_var)
+   call hi%write_dset(scan_var_name, scan_var)
    call hi%write_dset('sig', sig)
    call hi%write_dset('sig_2nd', sig_2nd)
 
@@ -245,7 +252,7 @@ contains
       real(RD)       :: A(2*(2*N+1),2*(2*N+1))
       type(params_t) :: pa_
 
-      pa_ = params_t(pa%R0, pa%Pr, pa%tau, pa%H_B, pa%D_B, 1._RD, pa%k_z)
+      pa_ = params_t(pa%R_0, pa%Pr, pa%tau, pa%H_B, pa%D_B, 1._RD, pa%k_z)
 
       call eval_matrix(N, pa_, A, parity=.TRUE., use_mesa=use_mesa)
       call pert_expand(N, pa%w_f, A, sig(1::2), partition=partition)
