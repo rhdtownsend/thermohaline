@@ -24,7 +24,7 @@ BIN_TARGETS = thermo
 # xxx_USES = source files providing modules USE'd by xxx
 # xxx_LIBS = library files required to link xxx
 
-thermo_SRCS = thermo.fypp params_m.fypp matrix_m.fypp finger_m.fypp
+thermo_SRCS = thermo.fypp params_m.fypp matrix_m.fypp finger_m.fypp parasite_model_matrices.f90
 thermo_USES = 
 thermo_LIBS = 
 

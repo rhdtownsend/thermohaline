@@ -22,34 +22,43 @@ program thermo
    character(:), allocatable :: nml_file
 
    integer                  :: unit
-   real(RD)                 :: k_z_min
-   real(RD)                 :: k_z_max
-   integer                  :: n_k_z
-   logical                  :: log_k_z
-   logical                  :: rescale_k_z_min
-   logical                  :: rescale_k_z_max
+   character(16)            :: scan_var_name
+   real(RD)                 :: scan_var_min
+   real(RD)                 :: scan_var_max
+   integer                  :: n_scan_var
+   logical                  :: log_scan_var
+   logical                  :: rescale_scan_var_min
+   logical                  :: rescale_scan_var_max
    real(RD)                 :: R0
    real(RD)                 :: Pr
    real(RD)                 :: tau
    real(RD)                 :: H_B
    real(RD)                 :: D_B
    real(RD)                 :: w_f
+   real(RD)                 :: k_z
    integer                  :: N
    logical                  :: split
+   logical                  :: use_mesa
+   logical                  :: partition
    character(256)           :: out_file
    real(RD)                 :: lam_f
    real(RD)                 :: l_f
-   real(RD), allocatable    :: k_z(:)
+   real(RD)                 :: k_z_min
+   real(RD)                 :: k_z_max
+   real(RD)                 :: w_f_min
+   real(RD)                 :: w_f_max
+   real(RD), allocatable    :: scan_var(:)
    type(params_t)           :: pa
    integer                  :: i
    complex(RD), allocatable :: sig(:,:)
-   complex(RD), allocatable :: sig_max(:)
+   complex(RD), allocatable :: sig_2nd(:,:)
    type(hdf5io_t)           :: hi
 
    namelist /params/ &
-      k_z_min, k_z_max, n_k_z, log_k_z, rescale_k_z_min, rescale_k_z_max, &
-      R0, Pr, tau, H_B, D_B, w_f, &
-      N, split, &
+      scan_var_name, scan_var_min, scan_var_max, n_scan_var, log_scan_var, &
+      rescale_scan_var_min, rescale_scan_var_max, &
+      R0, Pr, tau, H_B, D_B, w_f, k_z, &
+      N, split, use_mesa, partition, &
       out_file
 
    ! Read arguments
@@ -60,11 +69,12 @@ program thermo
 
    ! Read namelist parameters
 
-   k_z_min = 1e-1
-   k_z_max = 1.
-   log_k_z = .FALSE.
-   rescale_k_z_min = .FALSE.
-   rescale_k_z_max = .FALSE.
+   scan_var_name = 'k_z'
+   scan_var_min = 1e-1
+   scan_var_max = 1.
+   log_scan_var = .FALSE.
+   rescale_scan_var_min = .FALSE.
+   rescale_scan_var_max = .FALSE.
 
    R0 = 1.
    Pr = 1.
@@ -74,8 +84,11 @@ program thermo
    H_B = 1.
    D_B = 1.
    w_f = 1.
+   k_z = 1.
 
    split = .FALSE.
+   use_mesa = .FALSE.
+   partition = .FALSE.
 
    open(NEWUNIT=unit, STATUS='OLD', FILE=nml_file)
    read(unit, NML=params)
@@ -87,41 +100,76 @@ program thermo
    print *,'H_B :', H_B
    print *,'D_B :', D_B
    print *,'w_f :', w_f
+   print *,'k_z :', k_z
 
-   ! If necessary, rescale k_z range
+   ! Solve for fingering-instability parameters
 
    call solve_finger(R0, Pr, tau, lam_f, l_f)
 
-   if (rescale_k_z_min) k_z_min = k_z_min*l_f
-   if (rescale_k_z_max) k_z_max = k_z_max*l_f
-      
-   ! Loop over k_z
+   print *,'lam_f :', lam_f
+   print *,'l_f   :', l_f
 
-   allocate(k_z(n_k_z))
+   ! Calculate scan ranges
 
-   allocate(sig(4*(2*N+1), n_k_z))
-   allocate(sig_max(n_k_z))
+   select case(scan_var_name)
+   case('k_z')
+
+      k_z_min = scan_var_min
+      k_z_max = scan_var_max
+
+      if (rescale_scan_var_min) k_z_min = k_z_min*l_f
+      if (rescale_scan_var_max) k_z_max = k_z_max*l_f
+
+   case('w_f')
+
+      w_f_min = scan_var_min
+      w_f_max = scan_var_max
+
+   case default
+
+      @:ABORT('invalid scan_var_name')
+
+   end select
+
+   ! Loop over the scan variable
+
+   allocate(scan_var(n_scan_var))
+
+   allocate(sig(4*(2*N+1), n_scan_var))
+   allocate(sig_2nd(4*(2*N+1), n_scan_var))
 
    !$OMP PARALLEL DO PRIVATE(pa)
-   do i = 1, n_k_z
+   do i = 1, n_scan_var
 
       ! Set up parameters
- 
-      if (log_k_z) then
-         k_z(i) = 10**((LOG10(k_z_min)*(n_k_z-i) + LOG10(k_z_max)*(i-1))/(n_k_z - 1))
-      else
-         k_z(i) = (k_z_min*(n_k_z-i) + k_z_max*(i-1))/(n_k_z - 1)
-      endif
 
-      pa = params_t(R0, Pr, tau, H_B, D_B, w_f, k_z(i))
+      select case(scan_var_name)
+      case('k_z')
+
+         if (log_scan_var) then
+            scan_var(i) = 10**((LOG10(k_z_min)*(n_scan_var-i) + LOG10(k_z_max)*(i-1))/(n_scan_var - 1))
+         else
+            scan_var(i) = (k_z_min*(n_scan_var-i) + k_z_max*(i-1))/(n_scan_var - 1)
+         endif
+
+         pa = params_t(R0, Pr, tau, H_B, D_B, w_f, scan_var(i))
+
+      case('w_f')
+      
+         if (log_scan_var) then
+            scan_var(i) = 10**((LOG10(w_f_min)*(n_scan_var-i) + LOG10(w_f_max)*(i-1))/(n_scan_var - 1))
+         else
+            scan_var(i) = (w_f_min*(n_scan_var-i) + w_f_max*(i-1))/(n_scan_var - 1)
+         endif
+
+         pa = params_t(R0, Pr, tau, H_B, D_B, scan_var(i), k_z)
+
+      end select
 
       ! Evaluate the full set of eigenvalues
 
       call eigen_all(N, pa, split, sig(:,i))
-
-      ! Evaluate the eigenvalue with largest real part
-
-      !call eigen_max(N, pa, sig_max(i))
+      call eigen_2nd_order(N, pa, sig_2nd(:,i), partition)
 
    end do
 
@@ -129,11 +177,14 @@ program thermo
 
    hi = hdf5io_t(out_file, CREATE_FILE)
 
+   call hi%write_attr('scan_var_name', scan_var_name)
+
    call hi%write_attr('lam_f', lam_f)
    call hi%write_attr('l_f', l_f)
 
-   call hi%write_dset('k_z', k_z)
+   call hi%write_dset('scan_var', scan_var)
    call hi%write_dset('sig', sig)
+   call hi%write_dset('sig_2nd', sig_2nd)
 
    call hi%final()
 
@@ -141,12 +192,13 @@ program thermo
 
 contains
 
-   subroutine eigen_all(N, pa, split, sig)
+   subroutine eigen_all(N, pa, split, sig, use_mesa)
 
-      integer, intent(in)        :: N
-      type(params_t), intent(in) :: pa
-      logical, intent(in)        :: split
-      complex(RD), intent(out)   :: sig(:)
+      integer, intent(in)            :: N
+      type(params_t), intent(in)     :: pa
+      logical, intent(in)            :: split
+      complex(RD), intent(out)       :: sig(:)
+      logical, intent(in), optional  :: use_mesa
 
       real(RD), allocatable :: A(:,:)
       real(RD), allocatable :: wr(:)
@@ -158,11 +210,11 @@ contains
          allocate(wr(2*(2*N+1)))
          allocate(wi(2*(2*N+1)))
 
-         call eval_matrix(N, pa, A, .TRUE.)
+         call eval_matrix(N, pa, A, parity=.TRUE., use_mesa=use_mesa)
          call LA_GEEV(A, wr, wi)
          sig(1::2) = CMPLX(wr, wi, KIND=RD)
          
-         call eval_matrix(N, pa, A, .FALSE.)
+         call eval_matrix(N, pa, A, parity=.FALSE., use_mesa=use_mesa)
          call LA_GEEV(A, wr, wi)
          sig(2::2) = CMPLX(wr, wi, KIND=RD)
 
@@ -172,13 +224,190 @@ contains
          allocate(wr(4*(2*N+1)))
          allocate(wi(4*(2*N+1)))
 
-         call eval_matrix(N, pa, A)
+         call eval_matrix(N, pa, A, use_mesa=use_mesa)
          call LA_GEEV(A, wr, wi)
          sig = CMPLX(wr, wi, KIND=RD)
          
       end if
 
    end subroutine eigen_all
+
+   !****
+
+   subroutine eigen_2nd_order(N, pa, sig, partition, use_mesa)
+
+      integer, intent(in)           :: N
+      type(params_t), intent(in)    :: pa
+      complex(RD), intent(out)      :: sig(:)
+      logical, intent(in), optional :: partition
+      logical, intent(in), optional :: use_mesa
+
+      real(RD)       :: A(2*(2*N+1),2*(2*N+1))
+      type(params_t) :: pa_
+
+      pa_ = params_t(pa%R0, pa%Pr, pa%tau, pa%H_B, pa%D_B, 1._RD, pa%k_z)
+
+      call eval_matrix(N, pa_, A, parity=.TRUE., use_mesa=use_mesa)
+      call pert_expand(N, pa%w_f, A, sig(1::2), partition=partition)
+
+      call eval_matrix(N, pa_, A, parity=.FALSE., use_mesa=use_mesa)
+      call pert_expand(N, pa%w_f, A, sig(2::2), partition=partition)
+
+   end subroutine eigen_2nd_order
+
+   !****
+
+   subroutine pert_expand(N, w_f, A, sig, partition)
+
+      integer, intent(in)           :: N
+      real(RD), intent(in)          :: w_f
+      real(RD), intent(in)          :: A(:,:)
+      complex(RD), intent(out)      :: sig(:)
+      logical, intent(in), optional :: partition
+
+      logical     :: partition_
+      real(RD)    :: A_0(2*(2*N+1),2*(2*N+1))
+      real(RD)    :: A_1(2*(2*N+1),2*(2*N+1))
+      integer     :: i
+      integer     :: k
+      integer     :: m
+      complex(RD) :: XL(2*(2*N+1),2*(2*N+1))
+      complex(RD) :: XR(2*(2*N+1),2*(2*N+1))
+      complex(RD) :: V(2*(2*N+1),2*(2*N+1))
+      complex(RD) :: dsig(2*(2*N+1))
+
+      @:CHECK_BOUNDS(SIZE(A, 1), 2*(2*N+1))
+      @:CHECK_BOUNDS(SIZE(A, 2), 2*(2*N+1))
+
+      @:CHECK_BOUNDS(SIZE(sig), 2*(2*N+1))
+
+      if (PRESENT(partition)) then
+         partition_ = partition
+      else
+         partition_ = .FALSE.
+      end if
+      
+      ! Isolate the zeroth and first-order parts of the matrices
+
+      A_0 = 0._RD
+
+      A_0(1:2,1:2) = A(1:2,1:2)
+
+      i = 3
+
+      do m = 1, N
+         A_0(i:i+3,i:i+3) = A(i:i+3,i:i+3)
+         i = i + 4
+      end do
+
+      A_1 = A - A_0
+
+      ! Calculate eigenvalues and eigenvectors of the zeroth-order matrix
+
+      if (partition_) then
+
+         XL = 0._RD
+         XR = 0._RD
+
+         ! Handle the first 2x2 block
+
+         call solve_eigen(2, A_0(1:2,1:2), sig(1:2), XL(1:2,1:2), XR(1:2,1:2))
+
+         ! Handle the other blocks
+
+         i = 3
+
+         do m = 1, N
+            call solve_eigen(4, A_0(i:i+3,i:i+3), sig(i:i+3), XL(i:i+3,i:i+3), XR(i:i+3,i:i+3))
+            i = i + 4
+         end do
+
+      else
+
+         call solve_eigen(2*(2*N+1), A_0, sig, XL, XR)
+
+      end if
+
+      ! Calculate the overlap matrix
+
+      V = MATMUL(TRANSPOSE(CONJG(XL)), MATMUL(A_1, XR))
+
+      ! Evaluate the second-order corrections to w
+
+      dsig = 0._RD
+
+      row_loop: do i = 1, 2*(2*N+1)
+         col_loop: do k = 1, 2*(2*N+1)
+            if (i == k) then
+               cycle col_loop
+            end if
+            dsig(i) = dsig(i) + V(i,k)*V(k,i)/(sig(i) - sig(k))
+         end do col_loop
+      end do row_loop
+
+      ! Apply the corrections
+
+      sig = sig + w_f**2*dsig
+
+   end subroutine pert_expand
+
+   !****
+
+   subroutine solve_eigen(n, A, sig, XL, XR)
+
+      integer, intent(in)      :: n
+      real(RD), intent(in)     :: A(:,:)
+      complex(RD), intent(out) :: sig(:)
+      complex(RD), intent(out) :: XL(:,:)
+      complex(RD), intent(out) :: XR(:,:)
+
+      real(RD) :: A_tmp(n,n)
+      real(RD) :: sig_re(n)
+      real(RD) :: sig_im(n)
+      real(RD) :: XL_reim(n,n)
+      real(RD) :: XR_reim(n,n)
+      integer  :: i
+
+      @:CHECK_BOUNDS(SIZE(A, 1), n)
+      @:CHECK_BOUNDS(SIZE(A, 2), n)
+
+      @:CHECK_BOUNDS(SIZE(sig), n)
+      
+      @:CHECK_BOUNDS(SIZE(XL, 1), n)
+      @:CHECK_BOUNDS(SIZE(XL, 2), n)
+      
+      @:CHECK_BOUNDS(SIZE(XR, 1), n)
+      @:CHECK_BOUNDS(SIZE(XR, 2), n)
+      
+      ! Solve the eigenproblem to find eigenvalues and left/right
+      ! eigenvectors (stored as column vectors in the XL/XR matrices,
+      ! respectively)
+
+      A_tmp = A
+
+      call LA_GEEV(A_tmp, sig_re, sig_im, XL_reim, XR_reim)
+
+      sig = CMPLX(sig_re, sig_im, KIND=RD)
+
+      XL(:,1::2) = CMPLX(XL_reim(:,1::2),  XL_reim(:,2::2), KIND=RD)
+      XL(:,2::2) = CMPLX(XL_reim(:,1::2), -XL_reim(:,2::2), KIND=RD)
+
+      XR(:,1::2) = CMPLX(XR_reim(:,1::2),  XR_reim(:,2::2), KIND=RD)
+      XR(:,2::2) = CMPLX(XR_reim(:,1::2), -XR_reim(:,2::2), KIND=RD)
+
+      ! Rescale left eigenvectors so left-right pairs have a dot produce of unity
+
+      do i = 1, n
+         XL(:,i) = XL(:,i)/DOT_PRODUCT(XL(:,i), XR(:,i))
+      end do
+
+      ! Check that XL and XR^T are (almost) inverses
+
+      !associate (P => MATMUL(TRANSPOSE(CONJG(XL)), XR))
+      !   print *,'range:', MINVAL(REAL(P)), MAXVAL(REAL(P)), MINVAL(AIMAG(P)), MAXVAL(AIMAG(P))
+      !end associate
+
+   end subroutine solve_eigen
 
    ! !****
 

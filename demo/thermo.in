@@ -1,17 +1,20 @@
 &params
-  k_z_min = 1e-6
-  k_z_max = 1.0
-  n_k_z = 2500
-  log_k_z = .true.
-  rescale_k_z_min = .true.
-  rescale_k_z_max = .true.
-  N = 10
+  scan_var_name = 'k_z'
+  scan_var_min = 1e-6
+  scan_var_max = 1e-2
+  n_scan_var = 2500
+  log_scan_var = .true.
+  rescale_scan_var_min = .true.
+  rescale_scan_var_max = .true.
+  N = 8
   R0 = 8e6
   Pr = 1e-6
   tau = 1e-7
-  w_f = 0.0003806622073821217
+  w_f = 0.00044
   H_B = 1e-7
   D_B = 1e-5
   split = .TRUE.
+  use_mesa = .TRUE.
+  partition = .TRUE.
   out_file = 'thermo.h5'
 /  
