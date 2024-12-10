@@ -195,7 +195,7 @@ contains
 
             else if (iparam(5) /= NEV) then
                 ! note: it seems to be finding 2 eigenvalues when it should only be hitting 1
-                print *, 'NCONV does not match NEV. NCONV = ', iparam(5)
+                ! print *, 'NCONV does not match NEV. NCONV = ', iparam(5)
                 ! NCONV_err = .true.
                 ! return
             end if

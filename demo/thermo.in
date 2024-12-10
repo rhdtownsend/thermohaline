@@ -13,5 +13,6 @@
   H_B = 1e-7
   D_B = 1e-5
   split = .TRUE.
+  NEV   = 10
   out_file = 'thermo.h5'
 /  

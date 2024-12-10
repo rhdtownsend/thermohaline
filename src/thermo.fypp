@@ -35,6 +35,7 @@ program thermo
 
    character(:), allocatable :: nml_file
 
+   ! Namelist parameters
    integer                  :: unit
    real(RD)                 :: k_z_min
    real(RD)                 :: k_z_max
@@ -50,7 +51,10 @@ program thermo
    real(RD)                 :: w_f
    integer                  :: N
    logical                  :: split
+   integer                  :: NEV
    character(256)           :: out_file
+
+   ! other variables
    real(RD)                 :: lam_f
    real(RD)                 :: l_f
    real(RD), allocatable    :: k_z(:)
@@ -63,13 +67,14 @@ program thermo
    ! some of my additions
    integer                  :: info
    logical, allocatable     :: ar_sucess(:)
-   real(RD), allocatable    :: resid(:)
+   ! real(RD), allocatable    :: resid(:)
    integer, parameter       :: ar_start = 1
+   real(RD), allocatable        :: time(:,:)
 
    namelist /params/ &
       k_z_min, k_z_max, n_k_z, log_k_z, rescale_k_z_min, rescale_k_z_max, &
       R0, Pr, tau, H_B, D_B, w_f, &
-      N, split, &
+      N, split, NEV, &
       out_file
 
    ! Read arguments
@@ -112,8 +117,16 @@ program thermo
 
    call solve_finger(R0, Pr, tau, lam_f, l_f)
 
+   print *, 'lam_f :', lam_f
+   print *, 'l_f^2 :', l_f**2
+
    if (rescale_k_z_min) k_z_min = k_z_min*l_f
    if (rescale_k_z_max) k_z_max = k_z_max*l_f
+
+   print *, 'k_z_min :', k_z_min
+   print *, 'k_z_max :', k_z_max
+
+   print *, 'deg k_z :', 2._RD * SQRT(H_B) / ABS(D_B - Pr)
       
    ! Loop over k_z
 
@@ -123,14 +136,15 @@ program thermo
    allocate(sig_max_ar(n_k_z))
    allocate(sig_max_la(n_k_z))
    allocate(ar_sucess(n_k_z))
-   allocate(resid(@{prob_size(N)}@))
+   allocate(time(4, n_k_z))
+   ! allocate(resid(@{prob_size(N)}@))
 
    ar_sucess = .true.
 
    !!$OMP PARALLEL DO PRIVATE(pa)
    do i = 1, n_k_z
 
-      print *, 'i = ', i
+      ! print *, 'i = ', i
 
       ! Set up parameters
  
@@ -142,9 +156,33 @@ program thermo
 
       pa = params_t(R0, Pr, tau, H_B, D_B, w_f, k_z(i))
 
-      ! Evaluate the full set of eigenvalues
+      ! print the matrix
+      block
+         real(RD) :: A(@{prob_size(N)}@, @{prob_size(N)}@)
+         real(RD) :: A_split(@{block_size(N)}@, @{block_size(N)}@)
+         character(len=100) :: file_name
 
+         write(file_name, '(a,i0.4,a)') 'matrices/mat_', i, '.txt'
+
+         call eval_matrix(N, pa, A)
+         call write_matrix(A, TRIM(file_name))
+
+         write(file_name, '(a,i0.4,a)') 'matrices/mat_p_parity_', i, '.txt'
+
+         call eval_matrix(N, pa, A_split, .true.)
+         call write_matrix(A_split, TRIM(file_name))
+
+         write(file_name, '(a,i0.4,a)') 'matrices/mat_m_parity_', i, '.txt'
+
+         call eval_matrix(N, pa, A_split, .false.)
+         call write_matrix(A_split, TRIM(file_name))
+
+      end block
+
+      ! Evaluate the full set of eigenvalues
+      call CPU_TIME(time(1,i))
       call eigen_all(N, pa, split, sig(:,i))
+      call CPU_TIME(time(2,i))
 
       sig_max_la(i) = max_real(sig(:,i))
 
@@ -152,18 +190,20 @@ program thermo
 
       if (i > ar_start) then
 
-         call apply_arpack(N, pa, sig_max_ar(i-ar_start), split, sig_max_ar(i), info) !, resid)
+         call CPU_TIME(time(3,i))
+         call apply_arpack(N, pa, sig_max_ar(i-ar_start), split, sig_max_ar(i), info, NEV)
+         call CPU_TIME(time(4,i))
          ! call eigen_max(N, pa, sig_max_ar(i))
 
          if (info /= 0) then
             ! ARPACK failed, use the LAPACK result
             sig_max_ar(i) = sig_max_la(i)
             ar_sucess(i)  = .false.
-            print *, 'ARPACK failed at index i = ', i
+            ! print *, 'ARPACK failed at index i = ', i
             ! stop
          else
-            print *, achar(9), 'LAPACK result = ', sig_max_la(i)%re, sig_max_la(i)%im, &
-               'ARPACK result = ', sig_max_ar(i)%re, sig_max_ar(i)%im
+            ! print *, achar(9), 'LAPACK result = ', sig_max_la(i)%re, sig_max_la(i)%im, &
+            !    'ARPACK result = ', sig_max_ar(i)%re, sig_max_ar(i)%im
          end if
          ! if (i == 1458) stop
          ! stop
@@ -171,6 +211,7 @@ program thermo
 
          ! call RANDOM_NUMBER(resid)
          sig_max_ar(i) = sig_max_la(i)
+         time(3:4, i) = 0
          ! print *, 'i = ', i, 'LAPACK result = ', sig_max_la(i)
 
       end if
@@ -195,6 +236,8 @@ program thermo
    call hi%write_dset('sig_max_la', sig_max_la)
    call hi%write_dset('sig_max_ar', sig_max_ar)
    call hi%write_dset('ar_sucess', ar_sucess)
+   call hi%write_dset('la_time', time(2,:) - time(1,:))
+   call hi%write_dset('ar_time', time(4,:) - time(3,:))
 
    call hi%final()
 
@@ -386,13 +429,14 @@ contains
 
    end subroutine write_matrix
 
-   subroutine apply_arpack(N, pa, sig_shift, split, sig_max, info)
+   subroutine apply_arpack(N, pa, sig_shift, split, sig_max, info, NEV)
       integer, intent(in)        :: N
       type(params_t), intent(in) :: pa
       complex(RD), intent(in)    :: sig_shift ! e-value shift
       logical, intent(in)        :: split ! determine whether to use exp or trig basis
       complex(RD), intent(out)   :: sig_max
       integer, intent(out)       :: info
+      integer, intent(in), optional :: NEV
 
       real(RD), allocatable         :: A(:,:), A_shifted(:,:)
       integer                       :: sys_size, block_size
@@ -443,7 +487,11 @@ contains
       end if
 
       ! set up ar params
-      call ar_params%init_params(sys_size, 10) ! set NEV to 10
+      if (PRESENT(NEV)) then
+         call ar_params%init_params(sys_size, NEV)
+      else
+         call ar_params%init_params(sys_size, 10)
+      end if
 
       call eigen_shift_inv_v3(A, sys_size, CMPLX(sig_shift%re, 0._RD, KIND=RD), &
          A_factored, ar_params, sig_max, info)
