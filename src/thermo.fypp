@@ -51,6 +51,7 @@ program thermo
    type(params_t)           :: pa
    integer                  :: i
    complex(RD), allocatable :: sig(:,:)
+   complex(RD), allocatable :: sig_0th(:,:)
    complex(RD), allocatable :: sig_2nd(:,:)
    type(hdf5io_t)           :: hi
 
@@ -136,9 +137,10 @@ program thermo
    allocate(scan_var(n_scan_var))
 
    allocate(sig(4*(2*N+1), n_scan_var))
+   allocate(sig_0th(4*(2*N+1), n_scan_var))
    allocate(sig_2nd(4*(2*N+1), n_scan_var))
 
-   !$OMP PARALLEL DO PRIVATE(pa)
+   !!$OMP PARALLEL DO PRIVATE(pa)
    do i = 1, n_scan_var
 
       ! Set up parameters
@@ -169,7 +171,7 @@ program thermo
       ! Evaluate the full set of eigenvalues
 
       call eigen_all(N, pa, split, sig(:,i))
-      call eigen_2nd_order(N, pa, sig_2nd(:,i), partition)
+      call eigen_2nd_order(N, pa, sig_0th(:,i), sig_2nd(:,i), partition)
 
    end do
 
@@ -191,6 +193,7 @@ program thermo
 
    call hi%write_dset(scan_var_name, scan_var)
    call hi%write_dset('sig', sig)
+   call hi%write_dset('sig_0th', sig_0th)
    call hi%write_dset('sig_2nd', sig_2nd)
 
    call hi%final()
@@ -241,11 +244,12 @@ contains
 
    !****
 
-   subroutine eigen_2nd_order(N, pa, sig, partition, use_mesa)
+   subroutine eigen_2nd_order(N, pa, sig_0, sig_2, partition, use_mesa)
 
       integer, intent(in)           :: N
       type(params_t), intent(in)    :: pa
-      complex(RD), intent(out)      :: sig(:)
+      complex(RD), intent(out)      :: sig_0(:)
+      complex(RD), intent(out)      :: sig_2(:)
       logical, intent(in), optional :: partition
       logical, intent(in), optional :: use_mesa
 
@@ -255,21 +259,22 @@ contains
       pa_ = params_t(pa%R_0, pa%Pr, pa%tau, pa%H_B, pa%D_B, 1._RD, pa%k_z)
 
       call eval_matrix(N, pa_, A, parity=.TRUE., use_mesa=use_mesa)
-      call pert_expand(N, pa%w_f, A, sig(1::2), partition=partition)
+      call pert_expand(N, pa%w_f, A, sig_0(1::2), sig_2(1::2), partition=partition)
 
       call eval_matrix(N, pa_, A, parity=.FALSE., use_mesa=use_mesa)
-      call pert_expand(N, pa%w_f, A, sig(2::2), partition=partition)
+      call pert_expand(N, pa%w_f, A, sig_0(2::2), sig_2(2::2), partition=partition)
 
    end subroutine eigen_2nd_order
 
    !****
 
-   subroutine pert_expand(N, w_f, A, sig, partition)
+   subroutine pert_expand(N, w_f, A, sig_0, sig_2, partition)
 
       integer, intent(in)           :: N
       real(RD), intent(in)          :: w_f
       real(RD), intent(in)          :: A(:,:)
-      complex(RD), intent(out)      :: sig(:)
+      complex(RD), intent(out)      :: sig_0(:)
+      complex(RD), intent(out)      :: sig_2(:)
       logical, intent(in), optional :: partition
 
       logical     :: partition_
@@ -281,12 +286,13 @@ contains
       complex(RD) :: XL(2*(2*N+1),2*(2*N+1))
       complex(RD) :: XR(2*(2*N+1),2*(2*N+1))
       complex(RD) :: V(2*(2*N+1),2*(2*N+1))
-      complex(RD) :: dsig(2*(2*N+1))
+      ! complex(RD) :: dsig(2*(2*N+1))
 
       @:CHECK_BOUNDS(SIZE(A, 1), 2*(2*N+1))
       @:CHECK_BOUNDS(SIZE(A, 2), 2*(2*N+1))
 
-      @:CHECK_BOUNDS(SIZE(sig), 2*(2*N+1))
+      @:CHECK_BOUNDS(SIZE(sig_0), 2*(2*N+1))
+      @:CHECK_BOUNDS(SIZE(sig_2), 2*(2*N+1))
 
       if (PRESENT(partition)) then
          partition_ = partition
@@ -307,7 +313,7 @@ contains
          i = i + 4
       end do
 
-      A_1 = A - A_0
+      A_1 = (A - A_0) / w_f
 
       ! Calculate eigenvalues and eigenvectors of the zeroth-order matrix
 
@@ -318,20 +324,20 @@ contains
 
          ! Handle the first 2x2 block
 
-         call solve_eigen(2, A_0(1:2,1:2), sig(1:2), XL(1:2,1:2), XR(1:2,1:2))
+         call solve_eigen(2, A_0(1:2,1:2), sig_0(1:2), XL(1:2,1:2), XR(1:2,1:2))
 
          ! Handle the other blocks
 
          i = 3
 
          do m = 1, N
-            call solve_eigen(4, A_0(i:i+3,i:i+3), sig(i:i+3), XL(i:i+3,i:i+3), XR(i:i+3,i:i+3))
+            call solve_eigen(4, A_0(i:i+3,i:i+3), sig_0(i:i+3), XL(i:i+3,i:i+3), XR(i:i+3,i:i+3))
             i = i + 4
          end do
 
       else
 
-         call solve_eigen(2*(2*N+1), A_0, sig, XL, XR)
+         call solve_eigen(2*(2*N+1), A_0, sig_0, XL, XR)
 
       end if
 
@@ -341,20 +347,21 @@ contains
 
       ! Evaluate the second-order corrections to w
 
-      dsig = 0._RD
+      sig_2 = 0._RD
 
       row_loop: do i = 1, 2*(2*N+1)
          col_loop: do k = 1, 2*(2*N+1)
             if (i == k) then
                cycle col_loop
             end if
-            dsig(i) = dsig(i) + V(i,k)*V(k,i)/(sig(i) - sig(k))
+            sig_2(i) = sig_2(i) + V(i,k)*V(k,i)/(sig_0(i) - sig_0(k))
          end do col_loop
       end do row_loop
 
       ! Apply the corrections
 
-      sig = sig + w_f**2*dsig
+      ! sig = sig + w_f**2*dsig
+      ! sig = dsig
 
    end subroutine pert_expand
 
@@ -402,10 +409,10 @@ contains
       XR(:,1::2) = CMPLX(XR_reim(:,1::2),  XR_reim(:,2::2), KIND=RD)
       XR(:,2::2) = CMPLX(XR_reim(:,1::2), -XR_reim(:,2::2), KIND=RD)
 
-      ! Rescale left eigenvectors so left-right pairs have a dot produce of unity
+      ! Rescale right eigenvectors so left-right pairs have a dot produce of unity
 
       do i = 1, n
-         XL(:,i) = XL(:,i)/DOT_PRODUCT(XL(:,i), XR(:,i))
+         XR(:,i) = XR(:,i)/DOT_PRODUCT(XL(:,i), XR(:,i))
       end do
 
       ! Check that XL and XR^T are (almost) inverses
