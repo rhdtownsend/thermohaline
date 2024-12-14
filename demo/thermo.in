@@ -14,6 +14,9 @@
   D_B = 1e-5                    ! Field diffusivity
   w_f = 0.00044                 ! Dimensionless flow speed (ignored when scan_var_name is 'w_f')
   split = .TRUE.                ! Split matrix, considering odd- and even-parity modes separately
+  shift = .FALSE.               ! Apply a shift during the eigenvalue calculation, based the lower-right element of the matrix
+  invert = .FALSE.              ! Find eigenvalues of the inverted matrix, and then take their reciprocal
+  reorder = .FALSE.             ! Reorder the matrix so that smaller elements appear in the lower-right
   use_mesa = .TRUE.             ! Use the MESA matrix implementation (by way of parasite_model_matrices.f90)
   partition = .TRUE.            ! Partition the blocks when calculating the 2nd-order eigenvalues via perturbation expansion
   out_file = 'thermo.h5'        ! Output file name

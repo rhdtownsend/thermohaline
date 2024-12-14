@@ -38,6 +38,9 @@ program thermo
    real(RD)                 :: k_z
    integer                  :: N
    logical                  :: split
+   logical                  :: shift
+   logical                  :: invert
+   logical                  :: reorder
    logical                  :: use_mesa
    logical                  :: partition
    character(256)           :: out_file
@@ -58,7 +61,7 @@ program thermo
       scan_var_name, scan_var_min, scan_var_max, n_scan_var, log_scan_var, &
       rescale_scan_var_min, rescale_scan_var_max, &
       R_0, Pr, tau, H_B, D_B, w_f, k_z, &
-      N, split, use_mesa, partition, &
+      N, split, shift, invert, reorder, use_mesa, partition, &
       out_file
 
    ! Read arguments
@@ -87,6 +90,9 @@ program thermo
    k_z = 1.
 
    split = .FALSE.
+   shift = .FALSE.
+   invert = .FALSE.
+   reorder = .FALSE.
    use_mesa = .FALSE.
    partition = .FALSE.
 
@@ -168,7 +174,7 @@ program thermo
 
       ! Evaluate the full set of eigenvalues
 
-      call eigen_all(N, pa, split, sig(:,i))
+      call eigen_all(N, pa, split, shift, invert, reorder, sig(:,i))
       call eigen_2nd_order(N, pa, sig_2nd(:,i), partition)
 
    end do
@@ -176,6 +182,8 @@ program thermo
    ! Write out results
 
    hi = hdf5io_t(out_file, CREATE_FILE)
+
+   call hi%write_attr('scan_var_name', scan_var_name)
 
    call hi%write_attr('R_0', R_0)
    call hi%write_attr('Pr', Pr)
@@ -199,42 +207,175 @@ program thermo
 
 contains
 
-   subroutine eigen_all(N, pa, split, sig, use_mesa)
+   subroutine eigen_all(N, pa, split, shift, invert, reorder, sig, use_mesa)
 
       integer, intent(in)            :: N
       type(params_t), intent(in)     :: pa
       logical, intent(in)            :: split
+      logical, intent(in)            :: shift
+      logical, intent(in)            :: invert
+      logical, intent(in)            :: reorder
       complex(RD), intent(out)       :: sig(:)
       logical, intent(in), optional  :: use_mesa
 
+      integer               :: s
       real(RD), allocatable :: A(:,:)
+      real(RD)              :: sig_shift
       real(RD), allocatable :: wr(:)
       real(RD), allocatable :: wi(:)
+      integer, allocatable  :: ipiv(:)
+      real(RD), allocatable :: work(:)
+      integer               :: info
+      integer, allocatable  :: j(:)
+      integer               :: i
+      integer               :: k
+
+      @:CHECK_BOUNDS(SIZE(sig), 4*(2*N+1))
 
       if (split) then
 
-         allocate(A(2*(2*N+1),2*(2*N+1)))
-         allocate(wr(2*(2*N+1)))
-         allocate(wi(2*(2*N+1)))
+         s = 2*(2*N+1)
+
+         allocate(A(s,s))
+         allocate(wr(s))
+         allocate(wi(s))
+
+         allocate(ipiv(s))
+         allocate(work(2*s))
 
          call eval_matrix(N, pa, A, parity=.TRUE., use_mesa=use_mesa)
+
+         if (shift) then
+            sig_shift = REAL(A(s,s), RD)
+            A = A - sig_shift
+         else
+            sig_shift = 0._RD
+         end if
+
+         if (invert) then
+            call DGETRF(s, s, A, s, ipiv, info)
+            call DGETRI(s, A, s, ipiv, work, SIZE(work), info)
+         end if
+
+         if (reorder) then
+            A = A(s:1:-1,s:1:-1)
+         end if
+
          call LA_GEEV(A, wr, wi)
-         sig(1::2) = CMPLX(wr, wi, KIND=RD)
+
+         if (invert) then
+            sig(1::2) = 1._RD/CMPLX(wr, wi, KIND=RD) + sig_shift
+         else
+            sig(1::2) = CMPLX(wr, wi, KIND=RD) + sig_shift
+         end if
          
          call eval_matrix(N, pa, A, parity=.FALSE., use_mesa=use_mesa)
+
+         if (shift) then
+            sig_shift = REAL(A(s,s), RD)
+            A = A - sig_shift
+         else
+            sig_shift = 0._RD
+         end if
+
+         if (invert) then
+            call DGETRF(s, s, A, s, ipiv, info)
+            call DGETRI(s, A, s, ipiv, work, SIZE(work), info)
+         end if
+
+         if (reorder) then
+
+            allocate(j(s))
+
+            i = 1
+
+            do k = 1, N
+
+               j(i) = 4*(N - k) + 3
+               j(i+1) = j(i) + 1
+               j(i+2) = j(i) + 2
+               j(i+3) = j(i) + 3
+
+               i = i + 4
+
+            end do
+
+            j(i) = 1
+            j(i+1) = j(i) + 1
+
+            A = A(j,j)
+
+         end if
+
          call LA_GEEV(A, wr, wi)
-         sig(2::2) = CMPLX(wr, wi, KIND=RD)
+
+         if (invert) then
+            sig(2::2) = 1._RD/CMPLX(wr, wi, KIND=RD) + sig_shift
+         else
+            sig(2::2) = CMPLX(wr, wi, KIND=RD) + sig_shift
+         end if
 
       else
 
-         allocate(A(4*(2*N+1),4*(2*N+1)))
-         allocate(wr(4*(2*N+1)))
-         allocate(wi(4*(2*N+1)))
+         s = 4*(2*N+1)
+
+         allocate(A(s,s))
+         allocate(wr(s))
+         allocate(wi(s))
+
+         allocate(ipiv(s))
+         allocate(work(2*s))
 
          call eval_matrix(N, pa, A, use_mesa=use_mesa)
+
+         if (shift) then
+            sig_shift = REAL(A(4*(2*N+1),4*(2*N+1)), RD)
+            A = A - sig_shift
+         else
+            sig_shift = 0._RD
+         end if
+
+         if (invert) then
+            call DGETRF(s, s, A, s, ipiv, info)
+            call DGETRI(s, A, s, ipiv, work, SIZE(work), info)
+         end if
+
+         if (reorder) then
+
+            allocate(j(s))
+
+            i = 1
+
+            do k = 1, 2*N+1
+
+               if (MOD(k, 2) == 0) then
+                  j(i) = 2*(4*N-k) + 5
+                  j(i+1) = j(i) + 1
+                  j(i+2) = j(i) + 2
+                  j(i+3) = j(i) + 3
+               else
+                  j(i) = 2*(k-1) + 1
+                  j(i+1) = j(i) + 1
+                  j(i+2) = j(i) + 2
+                  j(i+3) = j(i) + 3
+               endif
+
+               i = i + 4
+
+            end do
+
+            A = A(j,j)
+
+         end if
+
          call LA_GEEV(A, wr, wi)
-         sig = CMPLX(wr, wi, KIND=RD)
-         
+
+         if (invert) then
+            sig = 1._RD/CMPLX(wr, wi, KIND=RD) + sig_shift
+         else
+            sig = CMPLX(wr, wi, KIND=RD) + sig_shift
+         end if
+
       end if
 
    end subroutine eigen_all
