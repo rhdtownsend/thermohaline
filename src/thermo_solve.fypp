@@ -1,0 +1,155 @@
+#:include 'forum.inc'
+
+program thermo_solve
+
+   ! Uses
+
+   use forum_m, split_ => split
+   use params_m
+   use finger_m
+   use thermo_solve_m
+
+   use ISO_FORTRAN_ENV
+
+   ! No implicit typing
+
+   implicit none
+
+   ! Variables
+
+   character(:), allocatable :: nml_file
+
+   integer                  :: unit
+   real(RD)                 :: k_z_min
+   real(RD)                 :: k_z_max
+   integer                  :: n_k_z
+   logical                  :: log_k_z
+   logical                  :: rescale_k_z_min
+   logical                  :: rescale_k_z_max
+   real(RD)                 :: R_0
+   real(RD)                 :: Pr
+   real(RD)                 :: tau
+   real(RD)                 :: H_B
+   real(RD)                 :: D_B
+   integer                  :: N
+   real(RD)                 :: C_2
+   logical                  :: split
+   logical                  :: reorder
+   logical                  :: use_mesa
+   character(256)           :: out_file
+   real(RD)                 :: lam_f
+   real(RD)                 :: l_f
+   real(RD), allocatable    :: k_z(:)
+   type(params_t)           :: pa
+   integer                  :: i
+   real(RD), allocatable    :: w_f(:)
+   real(RD), allocatable    :: sig(:)
+   type(hdf5io_t)           :: hi
+
+   namelist /params/ &
+      k_z_min, k_z_max, n_k_z, log_k_z, &
+      rescale_k_z_min, rescale_k_z_max, &
+      R_0, Pr, tau, H_B, D_B, &
+      N, C_2, split, reorder, use_mesa, &
+      out_file
+
+   ! Read arguments
+
+   @:ASSERT(n_arg() == 1,'Syntax: thermo_solve nml_file')
+
+   call get_arg(1, nml_file)
+
+   ! Read namelist parameters
+
+   k_z_min = 1e-1
+   k_z_max = 1.
+   log_k_z = .FALSE.
+   rescale_k_z_min = .FALSE.
+   rescale_k_z_max = .FALSE.
+
+   R_0 = 1.
+   Pr = 1.
+   tau = 1.
+   Pr = 1.
+   
+   H_B = 1.
+   D_B = 1.
+
+   C_2 = 0.33
+
+   split = .FALSE.
+   use_mesa = .FALSE.
+   reorder = .FALSE.
+
+   open(NEWUNIT=unit, STATUS='OLD', FILE=nml_file)
+   read(unit, NML=params)
+   close(unit)
+
+   print *,'R_0   :', R_0
+   print *,'Pr    :', Pr
+   print *,'tau   :', tau
+   print *,'H_B   :', H_B
+   print *,'D_B   :', D_B
+   print *,'C_2   :', C_2
+
+   ! Solve for fingering-instability parameters
+
+   call solve_finger(R_0, Pr, tau, lam_f, l_f)
+
+   print *,'lam_f :', lam_f
+   print *,'l_f   :', l_f
+
+   ! Calculate scan ranges
+
+   if (rescale_k_z_min) k_z_min = k_z_min*l_f
+   if (rescale_k_z_max) k_z_max = k_z_max*l_f
+
+   ! Loop over k_z
+
+   allocate(k_z(n_k_z))
+   allocate(w_f(n_k_z))
+   allocate(sig(n_k_z))
+
+   !$OMP PARALLEL DO PRIVATE(pa)
+   do i = 1, n_k_z
+
+      ! Set up parameters
+
+      if (log_k_z) then
+         k_z(i) = 10**((LOG10(k_z_min)*(n_k_z-i) + LOG10(k_z_max)*(i-1))/(n_k_z - 1))
+      else
+         k_z(i) = (k_z_min*(n_k_z-i) + k_z_max*(i-1))/(n_k_z - 1)
+      endif
+
+      pa = params_t(R_0, Pr, tau, H_B, D_B, 0._RD, k_z(i))
+
+      ! Solve for w_f
+
+      call solve_w_f(N, pa, lam_f/C_2, split, reorder, use_mesa, w_f(i), sig(i))
+
+      print *,i,n_k_z,w_f(i),sig(i),lam_f/C_2
+
+   end do
+
+   ! Write out results
+
+   hi = hdf5io_t(out_file, CREATE_FILE)
+
+   call hi%write_attr('R_0', R_0)
+   call hi%write_attr('Pr', Pr)
+   call hi%write_attr('tau', tau)
+   call hi%write_attr('H_B', H_B)
+   call hi%write_attr('D_B', D_B)
+
+   call hi%write_attr('lam_f', lam_f)
+   call hi%write_attr('l_f', l_f)
+
+   call hi%write_dset('k_z', k_z)
+   call hi%write_dset('w_f', w_f)
+   call hi%write_dset('sig', sig)
+
+   call hi%final()
+
+   ! Finished
+
+end program thermo_solve

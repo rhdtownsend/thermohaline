@@ -1,0 +1,171 @@
+#:include 'forum.inc'
+
+program thermo_scan_2d
+
+   ! Uses
+
+   use forum_m, split_ => split
+   use params_m
+   use finger_m
+   use thermo_m
+
+   use ISO_FORTRAN_ENV
+
+   ! No implicit typing
+
+   implicit none
+
+   ! Variables
+
+   character(:), allocatable :: nml_file
+
+   integer               :: unit
+   real(RD)              :: k_z_min
+   real(RD)              :: k_z_max
+   integer               :: n_k_z
+   logical               :: log_k_z
+   logical               :: rescale_k_z_min
+   logical               :: rescale_k_z_max
+   real(RD)              :: w_f_min
+   real(RD)              :: w_f_max
+   integer               :: n_w_f
+   logical               :: log_w_f
+   real(RD)              :: R_0
+   real(RD)              :: Pr
+   real(RD)              :: tau
+   real(RD)              :: H_B
+   real(RD)              :: D_B
+   integer               :: N
+   logical               :: split
+   logical               :: shift
+   logical               :: invert
+   logical               :: reorder
+   logical               :: use_mesa
+   character(256)        :: out_file
+   real(RD)              :: lam_f
+   real(RD)              :: l_f
+   real(RD), allocatable :: k_z(:)
+   real(RD), allocatable :: w_f(:)
+   real(RD), allocatable :: S(:,:)
+   integer               :: i
+   integer               :: j
+   type(params_t)        :: pa
+   type(hdf5io_t)        :: hi
+
+   namelist /params/ &
+      k_z_min, k_z_max, n_k_z, log_k_z, rescale_k_z_min, rescale_k_z_max, &
+      w_f_min, w_f_max, n_w_f, log_w_f, &
+      R_0, Pr, tau, H_B, D_B, &
+      N, split, shift, invert, reorder, use_mesa, &
+      out_file
+
+   ! Read arguments
+
+   @:ASSERT(n_arg() == 1,'Syntax: thermo_scan_2d nml_file')
+
+   call get_arg(1, nml_file)
+
+   ! Read namelist parameters
+
+   k_z_min = 1e-1
+   k_z_max = 1.
+   n_k_z = 2
+   log_k_z = .FALSE.
+   rescale_k_z_min = .FALSE.
+   rescale_k_z_max = .FALSE.
+
+   w_f_min = 1e-1
+   w_f_max = 1.
+   n_w_f = 2
+   log_w_f = .FALSE.
+
+   R_0 = 1.
+   Pr = 1.
+   tau = 1.
+   Pr = 1.
+   
+   H_B = 1.
+   D_B = 1.
+
+   split = .FALSE.
+   shift = .FALSE.
+   invert = .FALSE.
+   reorder = .FALSE.
+   use_mesa = .FALSE.
+
+   open(NEWUNIT=unit, STATUS='OLD', FILE=nml_file)
+   read(unit, NML=params)
+   close(unit)
+
+   print *,'R_0   :', R_0
+   print *,'Pr    :', Pr
+   print *,'tau   :', tau
+   print *,'H_B   :', H_B
+   print *,'D_B   :', D_B
+
+   ! Solve for fingering-instability parameters
+
+   call solve_finger(R_0, Pr, tau, lam_f, l_f)
+
+   print *,'lam_f :', lam_f
+   print *,'l_f   :', l_f
+
+   ! Set up scan axes
+
+   if (rescale_k_z_min) k_z_min = k_z_min*l_f
+   if (rescale_k_z_max) k_z_max = k_z_max*l_f
+
+   if (log_k_z) then
+      k_z = [(10**((LOG10(k_z_min)*(n_k_z-i) + LOG10(k_z_max)*(i-1))/(n_k_z - 1)), i=1,n_k_z)]
+   else
+      k_z = [((k_z_min*(n_k_z-i) + k_z_max*(i-1))/(n_k_z - 1), i=1,n_k_z)]
+   endif
+
+   if (log_w_f) then
+      w_f = [(10**((LOG10(w_f_min)*(n_w_f-j) + LOG10(w_f_max)*(j-1))/(n_w_f - 1)), j=1,n_w_f)]
+   else
+      w_f = [((w_f_min*(n_w_f-j) + w_f_max*(j-1))/(n_w_f - 1), j=1,n_w_f)]
+   endif
+
+   ! Loop over the grid, evaluating the maximal growth rate S
+
+   allocate(S(n_k_z, n_w_f))
+
+   !$OMP PARALLEL DO PRIVATE(pa)
+   do j = 1, n_w_f
+      do i = 1, n_k_z
+
+         ! Set up parameters
+
+         pa = params_t(R_0, Pr, tau, H_B, D_B, w_f(j), k_z(i))
+
+         ! Evaluate S
+
+         call eigen_max(N, pa, split, shift, invert, reorder, S(i,j))
+
+      end do
+   end do
+
+   ! Write out results
+
+   hi = hdf5io_t(out_file, CREATE_FILE)
+
+   call hi%write_attr('R_0', R_0)
+   call hi%write_attr('Pr', Pr)
+   call hi%write_attr('tau', tau)
+   call hi%write_attr('H_B', H_B)
+   call hi%write_attr('D_B', D_B)
+
+   call hi%write_attr('lam_f', lam_f)
+   call hi%write_attr('l_f', l_f)
+
+   call hi%write_dset('k_z', k_z)
+   call hi%write_dset('w_f', w_f)
+
+   call hi%write_dset('S', S)
+
+   call hi%final()
+
+   ! Finished
+
+end program thermo_scan_2d

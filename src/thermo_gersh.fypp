@@ -1,0 +1,215 @@
+#:include 'forum.inc'
+
+program thermo_gersh
+
+   ! Uses
+
+   use forum_m, split_ => split
+   use params_m
+   use finger_m
+   use matrix_m
+
+   use f95_lapack
+
+   use ISO_FORTRAN_ENV
+
+   ! No implicit typing
+
+   implicit none
+
+   ! Variables
+
+   character(:), allocatable :: nml_file
+
+   integer                  :: unit
+   real(RD)                 :: k_z_min
+   real(RD)                 :: k_z_max
+   integer                  :: n_k_z
+   logical                  :: log_k_z
+   logical                  :: rescale_k_z_min
+   logical                  :: rescale_k_z_max
+   real(RD)                 :: R_0
+   real(RD)                 :: Pr
+   real(RD)                 :: tau
+   real(RD)                 :: H_B
+   real(RD)                 :: D_B
+   integer                  :: N
+   logical                  :: use_mesa
+   character(256)           :: out_file
+   real(RD)                 :: lam_f
+   real(RD)                 :: l_f
+   real(RD), allocatable    :: k_z(:)
+   complex(RD), allocatable :: sig(:,:)
+   real(RD), allocatable    :: C_off(:,:)
+   integer                  :: i
+   type(params_t)           :: pa
+   type(hdf5io_t)           :: hi
+
+   namelist /params/ &
+      k_z_min, k_z_max, n_k_z, log_k_z, &
+      rescale_k_z_min, rescale_k_z_max, &
+      R_0, Pr, tau, H_B, D_B, &
+      N, use_mesa, &
+      out_file
+
+   ! Read arguments
+
+   @:ASSERT(n_arg() == 1,'Syntax: thermo nml_file')
+
+   call get_arg(1, nml_file)
+
+   ! Read namelist parameters
+
+   k_z_min = 1e-1
+   k_z_max = 1.
+   log_k_z = .FALSE.
+   rescale_k_z_min = .FALSE.
+   rescale_k_z_max = .FALSE.
+
+   R_0 = 1.
+   Pr = 1.
+   tau = 1.
+   Pr = 1.
+   
+   H_B = 1.
+   D_B = 1.
+
+   use_mesa = .FALSE.
+
+   open(NEWUNIT=unit, STATUS='OLD', FILE=nml_file)
+   read(unit, NML=params)
+   close(unit)
+
+   print *,'R_0   :', R_0
+   print *,'Pr    :', Pr
+   print *,'tau   :', tau
+   print *,'H_B   :', H_B
+   print *,'D_B   :', D_B
+   print *,'k_z   :', k_z
+
+   ! Solve for fingering-instability parameters
+
+   call solve_finger(R_0, Pr, tau, lam_f, l_f)
+
+   print *,'lam_f :', lam_f
+   print *,'l_f   :', l_f
+
+   ! Calculate scan ranges
+
+   if (rescale_k_z_min) k_z_min = k_z_min*l_f
+   if (rescale_k_z_max) k_z_max = k_z_max*l_f
+
+   ! Loop over k_z
+
+   allocate(k_z(n_k_z))
+
+   allocate(sig(4*(2*N+1), n_k_z))
+   allocate(C_off(4*(2*N+1), n_k_z))
+ 
+   !$OMP PARALLEL DO PRIVATE(pa)
+   do i = 1, n_k_z
+
+      ! Set up parameters
+
+      if (log_k_z) then
+         k_z(i) = 10**((LOG10(k_z_min)*(n_k_z-i) + LOG10(k_z_max)*(i-1))/(n_k_z - 1))
+      else
+         k_z(i) = (k_z_min*(n_k_z-i) + k_z_max*(i-1))/(n_k_z - 1)
+      endif
+
+      pa = params_t(R_0, Pr, tau, H_B, D_B, 1._RD, k_z(i))
+
+      ! Calculate sig and C_off
+
+      call eval_sig_C_off(N, pa, .TRUE., use_mesa, sig(1::2,i), C_off(1::2,i))
+      call eval_sig_C_off(N, pa, .FALSE., use_mesa, sig(2::2,i), C_off(2::2,i))
+
+   end do
+
+   ! Write out results
+
+   hi = hdf5io_t(out_file, CREATE_FILE)
+
+   call hi%write_attr('R_0', R_0)
+   call hi%write_attr('Pr', Pr)
+   call hi%write_attr('tau', tau)
+   call hi%write_attr('H_B', H_B)
+   call hi%write_attr('D_B', D_B)
+   call hi%write_attr('k_z', k_z)
+
+   call hi%write_attr('lam_f', lam_f)
+   call hi%write_attr('l_f', l_f)
+
+   call hi%write_dset('k_z', k_z)
+
+   call hi%write_dset('sig', sig)
+   call hi%write_dset('C_off', C_off)
+
+   call hi%final()
+
+contains
+
+   subroutine eval_sig_C_off(N, pa, parity, use_mesa, sig, C_off)
+
+      integer, intent(in)        :: N
+      type(params_t), intent(in) :: pa
+      logical, intent(in)        :: parity
+      logical, intent(in)        :: use_mesa
+      complex(RD), intent(out)   :: sig(:)
+      real(RD), intent(out)      :: C_off(:)
+
+      integer  :: i
+      integer  :: m
+      real(RD) :: A(2*(2*N+1),2*(2*N+1))
+      real(RD) :: A_0(2*(2*N+1),2*(2*N+1))
+      real(RD) :: A_1(2*(2*N+1),2*(2*N+1))
+      real(RD) :: sig_re(4)
+      real(RD) :: sig_im(4)
+      
+      @:CHECK_BOUNDS(SIZE(sig), 2*(2*N+1))
+      @:CHECK_BOUNDS(SIZE(C_off), 2*(2*N+1))
+   
+      ! Evaluate the zeroth- and first-order parts of the matrix
+
+      call eval_matrix(N, pa, A, parity=parity, use_mesa=use_mesa)
+
+      A_0 = 0._RD
+
+      A_0(1:2,1:2) = A(1:2,1:2)
+
+      i = 3
+
+      do m = 1, N
+         A_0(i:i+3,i:i+3) = A(i:i+3,i:i+3)
+         i = i + 4
+      end do
+
+      A_1 = A - A_0
+
+      ! Calculate eigenvalues of A_0 and the off-diagonal C's
+
+      call LA_GEEV(A_0(1:2,1:2), sig_re(1:2), sig_im(1:2))
+
+      sig(1:2) = CMPLX(sig_re(1:2), sig_im(1:2), KIND=RD)
+      C_off(1:2) = SUM(ABS(A_1(1:2,:)))
+
+      i = 3
+
+      do m = 1, N
+
+         call LA_GEEV(A_0(i:i+3,i:i+3), sig_re, sig_im)
+
+         sig(i:i+3) = CMPLX(sig_re, sig_im, KIND=RD)
+         C_off(i:i+3) = SUM(ABS(A_1(i:i+3,:)))
+      
+         i = i + 4
+
+      end do
+
+      ! Finish
+
+      return
+
+   end subroutine eval_sig_C_off
+
+end program thermo_gersh

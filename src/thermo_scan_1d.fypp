@@ -1,0 +1,210 @@
+#:include 'forum.inc'
+
+program thermo_scan_1d
+
+   ! Uses
+
+   use forum_m, split_ => split
+   use params_m
+   use finger_m
+   use thermo_m
+
+   use ISO_FORTRAN_ENV
+
+   ! No implicit typing
+
+   implicit none
+
+   ! Variables
+
+   character(:), allocatable :: nml_file
+
+   integer                  :: unit
+   character(16)            :: scan_var_name
+   real(RD)                 :: scan_var_min
+   real(RD)                 :: scan_var_max
+   integer                  :: n_scan_var
+   logical                  :: log_scan_var
+   logical                  :: rescale_k_z_min
+   logical                  :: rescale_k_z_max
+   logical                  :: rescale_k_z
+   real(RD)                 :: R_0
+   real(RD)                 :: Pr
+   real(RD)                 :: tau
+   real(RD)                 :: H_B
+   real(RD)                 :: D_B
+   real(RD)                 :: w_f
+   real(RD)                 :: k_z
+   integer                  :: N
+   logical                  :: split
+   logical                  :: shift
+   logical                  :: invert
+   logical                  :: reorder
+   logical                  :: use_mesa
+   logical                  :: partition
+   character(256)           :: out_file
+   real(RD)                 :: lam_f
+   real(RD)                 :: l_f
+   real(RD)                 :: k_z_min
+   real(RD)                 :: k_z_max
+   real(RD)                 :: w_f_min
+   real(RD)                 :: w_f_max
+   real(RD), allocatable    :: scan_var(:)
+   type(params_t)           :: pa
+   integer                  :: i
+   complex(RD), allocatable :: sig(:,:)
+   complex(RD), allocatable :: sig_2nd(:,:)
+   type(hdf5io_t)           :: hi
+
+   namelist /params/ &
+      scan_var_name, scan_var_min, scan_var_max, n_scan_var, log_scan_var, &
+      rescale_k_z_min, rescale_k_z_max, rescale_k_z, &
+      R_0, Pr, tau, H_B, D_B, w_f, k_z, &
+      N, split, shift, invert, reorder, use_mesa, partition, &
+      out_file
+
+   ! Read arguments
+
+   @:ASSERT(n_arg() == 1,'Syntax: thermo nml_file')
+
+   call get_arg(1, nml_file)
+
+   ! Read namelist parameters
+
+   scan_var_name = 'k_z'
+   scan_var_min = 1e-1
+   scan_var_max = 1.
+   log_scan_var = .FALSE.
+   rescale_k_z_min = .FALSE.
+   rescale_k_z_max = .FALSE.
+   rescale_k_z = .FALSE.
+
+   R_0 = 1.
+   Pr = 1.
+   tau = 1.
+   Pr = 1.
+   
+   H_B = 1.
+   D_B = 1.
+   w_f = 1.
+   k_z = 1.
+
+   split = .FALSE.
+   shift = .FALSE.
+   invert = .FALSE.
+   reorder = .FALSE.
+   use_mesa = .FALSE.
+   partition = .FALSE.
+
+   open(NEWUNIT=unit, STATUS='OLD', FILE=nml_file)
+   read(unit, NML=params)
+   close(unit)
+
+   print *,'R_0   :', R_0
+   print *,'Pr    :', Pr
+   print *,'tau   :', tau
+   print *,'H_B   :', H_B
+   print *,'D_B   :', D_B
+   print *,'w_f   :', w_f
+   print *,'k_z   :', k_z
+
+   ! Solve for fingering-instability parameters
+
+   call solve_finger(R_0, Pr, tau, lam_f, l_f)
+
+   print *,'lam_f :', lam_f
+   print *,'l_f   :', l_f
+
+   ! Calculate scan ranges
+
+   select case(scan_var_name)
+   case('k_z')
+
+      k_z_min = scan_var_min
+      k_z_max = scan_var_max
+
+      if (rescale_k_z_min) k_z_min = k_z_min*l_f
+      if (rescale_k_z_max) k_z_max = k_z_max*l_f
+
+   case('w_f')
+
+      w_f_min = scan_var_min
+      w_f_max = scan_var_max
+
+      if (rescale_k_z) k_z = k_z*l_f
+
+   case default
+
+      @:ABORT('invalid scan_var_name')
+
+   end select
+
+   ! Loop over the scan variable
+
+   allocate(scan_var(n_scan_var))
+
+   allocate(sig(4*(2*N+1), n_scan_var))
+   allocate(sig_2nd(4*(2*N+1), n_scan_var))
+
+   !$OMP PARALLEL DO PRIVATE(pa)
+   do i = 1, n_scan_var
+
+      ! Set up parameters
+
+      select case(scan_var_name)
+      case('k_z')
+
+         if (log_scan_var) then
+            scan_var(i) = 10**((LOG10(k_z_min)*(n_scan_var-i) + LOG10(k_z_max)*(i-1))/(n_scan_var - 1))
+         else
+            scan_var(i) = (k_z_min*(n_scan_var-i) + k_z_max*(i-1))/(n_scan_var - 1)
+         endif
+
+         pa = params_t(R_0, Pr, tau, H_B, D_B, w_f, scan_var(i))
+
+      case('w_f')
+      
+         if (log_scan_var) then
+            scan_var(i) = 10**((LOG10(w_f_min)*(n_scan_var-i) + LOG10(w_f_max)*(i-1))/(n_scan_var - 1))
+         else
+            scan_var(i) = (w_f_min*(n_scan_var-i) + w_f_max*(i-1))/(n_scan_var - 1)
+         endif
+
+         pa = params_t(R_0, Pr, tau, H_B, D_B, scan_var(i), k_z)
+
+      end select
+
+      ! Evaluate the full set of eigenvalues
+
+      call eigen_all(N, pa, split, shift, invert, reorder, sig(:,i))
+      call eigen_2nd_order(N, pa, sig_2nd(:,i), partition)
+
+   end do
+
+   ! Write out results
+
+   hi = hdf5io_t(out_file, CREATE_FILE)
+
+   call hi%write_attr('scan_var_name', scan_var_name)
+
+   call hi%write_attr('R_0', R_0)
+   call hi%write_attr('Pr', Pr)
+   call hi%write_attr('tau', tau)
+   call hi%write_attr('H_B', H_B)
+   call hi%write_attr('D_B', D_B)
+
+   if (scan_var_name /= 'k_z') call hi%write_attr('k_z', k_z)
+   if (scan_var_name /= 'w_f') call hi%write_attr('w_f', w_f)
+
+   call hi%write_attr('lam_f', lam_f)
+   call hi%write_attr('l_f', l_f)
+
+   call hi%write_dset(scan_var_name, scan_var)
+   call hi%write_dset('sig', sig)
+   call hi%write_dset('sig_2nd', sig_2nd)
+
+   call hi%final()
+
+   ! Finished
+
+end program thermo_scan_1d

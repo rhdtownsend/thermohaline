@@ -1,0 +1,93 @@
+#:include 'forum.inc'
+
+module thermo_solve_m
+
+   ! Uses
+
+   use forum_m, split_ => split
+   use params_m
+   use thermo_m
+   use root_m
+
+   use ISO_FORTRAN_ENV
+
+   ! No implicit typing
+
+   implicit none
+
+   ! Procedures
+
+contains
+
+   subroutine solve_w_f(N, pa, rhs, split, reorder, use_mesa, w_f, sig_max)
+
+      integer, intent(in)        :: N
+      type(params_t), intent(in) :: pa
+      real(RD), intent(in)       :: rhs
+      logical, intent(in)        :: split
+      logical, intent(in)        :: reorder
+      logical, intent(in)        :: use_mesa
+      real(RD), intent(out)      :: w_f
+      real(RD), intent(out)      :: sig_max
+
+      real(RD) :: x_a
+      real(RD) :: x_b
+      real(RD) :: f_a
+      real(RD) :: f_b
+      integer  :: n_iter
+
+      ! Given the equation sigma(w_f) = rhs, solve for w_f
+
+      x_a = 0._RD
+      f_a = func(x_a)
+
+      x_b = 1._RD
+
+      do
+         f_b = func(x_b)
+
+         if (f_a*f_b <= 0._RD) exit
+
+         x_b = 2*x_b
+
+      end do
+
+      n_iter = 250
+
+      call find_root(func, x_a, x_b, 0._RD, w_f, n_iter=n_iter)
+
+      f_a = func(w_f)
+
+      ! Finish
+
+      return
+
+   contains
+
+      function func(x)
+
+         real(RD), intent(in) :: x
+         real(RD)             :: func
+
+         complex(RD)    :: sig(4*(2*N+1))
+         type(params_t) :: pa_
+
+         ! Evaluate the eigenvalues
+
+         associate (w_f => x)
+
+            pa_ = params_t(pa%R_0, pa%Pr, pa%tau, pa%H_B, pa%D_B, w_f, pa%k_z)
+
+            call eigen_all(N, pa_, split, .FALSE., .FALSE., reorder, sig, use_mesa=use_mesa)
+
+            sig_max = MAXVAL(REAL(sig, RD))
+
+            func = sig_max - rhs
+
+         end associate
+
+      end function func
+
+   end subroutine solve_w_f
+
+end module thermo_solve_m
