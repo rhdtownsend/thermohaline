@@ -1,0 +1,400 @@
+#:include 'forum.inc'
+
+module pert_expand_m
+
+   ! Uses
+
+   use forum_m
+   use params_m
+
+   use ISO_FORTRAN_ENV
+
+   ! No implicit typing
+
+   implicit none
+
+   ! Access specifiers
+
+   private
+
+   public :: eval_A00_matrix
+   public :: eval_A01_matrix
+   public :: eval_A10_matrix
+   public :: eval_A11_matrix
+   public :: eval_A02_matrix
+   public :: eval_A20_matrix
+
+contains
+
+   subroutine eval_A00_matrix(N, pa, A)
+
+      integer, intent(in)        :: N
+      type(params_t), intent(in) :: pa
+      real(RD), intent(out)      :: A(:,:)
+
+      integer :: i
+      integer :: m
+
+      @:CHECK_BOUNDS(SIZE(A, 1),4*(2*N+1))
+      @:CHECK_BOUNDS(SIZE(A, 2),4*(2*N+1))
+
+      ! Evaluate the matrix
+
+      i = 1
+
+      A = 0._RD
+ 
+      associate( &
+         Pr => pa%Pr, &
+         tau => pa%tau, &
+         R_0 => pa%R_0, &
+         D_B => pa%D_B, &
+         l_f => pa%l_f)
+
+         block_loop: do m = -N, N
+
+            associate(B => A(i:i+3,i:i+3))
+
+               if (m /= 0) then
+
+                  B(1,1) = -Pr*m**2*l_f**2
+                  B(1,2) = Pr/(m*l_f)
+                  B(1,3) = -Pr/(m*l_f)
+                  B(1,4) = 0
+
+                  B(2,1) = -m*l_f
+                  B(2,2) = -m**2*l_f**2
+                  B(2,3) = 0
+                  B(2,4) = 0
+
+                  B(3,1) = -m*l_f/R_0
+                  B(3,2) = 0
+                  B(3,3) = -tau*m**2*l_f**2
+                  B(3,4) = 0
+
+                  B(4,1) = 0
+                  B(4,2) = 0
+                  B(4,3) = 0
+                  B(4,4) = -D_B*m**2*l_f**2
+
+               end if
+
+            end associate
+
+            i = i + 4
+
+         end do block_loop
+
+      end associate
+
+      ! Finish
+
+      return
+
+   end subroutine eval_A00_matrix
+
+   !****
+
+   subroutine eval_A01_matrix(N, pa, A)
+
+      integer, intent(in)        :: N
+      type(params_t), intent(in) :: pa
+      real(RD), intent(out)      :: A(:,:)
+
+      integer  :: i
+      integer  :: m
+      real(RD) :: F_psi
+      real(RD) :: F_T
+      real(RD) :: F_C
+
+      @:CHECK_BOUNDS(SIZE(A, 1),4*(2*N+1))
+      @:CHECK_BOUNDS(SIZE(A, 2),4*(2*N+1))
+
+      ! Evaluate the matrix
+
+      i = 1
+
+      A = 0._RD
+
+      associate( &
+         tau => pa%tau, &
+         R_0 => pa%R_0, &
+         l_f => pa%l_f, &
+         lam_f => pa%lam_f)
+
+         F_psi = 1/(2*l_f)
+         F_T = -l_f*F_psi/(lam_f**2 + l_f**2)
+         F_C = -l_f*F_psi/(R_0*(lam_f**2 + tau*l_f**2))
+         
+         block_loop: do m = -N, N
+
+            if (m > -N) then
+
+               associate(B => A(i:i+3,i-4:i-1))
+
+                  if (m /= 0) then
+
+                     B(1,1) = l_f*F_psi*(2._RD-m)/m
+                     B(1,2) = 0
+                     B(1,3) = 0
+                     B(1,4) = 0
+
+                  else
+
+                     B(1,1) = -l_f*F_psi
+                     B(1,2) = 0
+                     B(1,3) = 0
+                     B(1,4) = 0
+
+                  end if
+
+                  B(2,1) = l_f*F_T
+                  B(2,2) = -l_f*F_psi
+                  B(2,3) = 0
+                  B(2,4) = 0
+
+                  B(3,1) = l_f*F_C
+                  B(3,2) = 0
+                  B(3,3) = -l_f*F_psi
+                  B(3,4) = 0
+
+                  B(4,1) = 0
+                  B(4,2) = 0
+                  B(4,3) = 0
+                  B(4,4) = -l_f*F_psi
+
+               end associate
+
+            end if
+
+            if (m < N) then
+
+               associate(B => A(i:i+3,i+4:i+7))
+
+                  if (m /= 0) then
+
+                     B(1,1) = l_f*F_psi*(2._RD+m)/m
+                     B(1,2) = 0
+                     B(1,3) = 0
+                     B(1,4) = 0
+
+                  else
+
+                     B(1,1) = l_f*F_psi
+                     B(1,2) = 0
+                     B(1,3) = 0
+                     B(1,4) = 0
+
+                  end if
+
+                  B(2,1) = l_f*F_T
+                  B(2,2) = l_f*F_psi
+                  B(2,3) = 0
+                  B(2,4) = 0
+
+                  B(3,1) = l_f*F_C
+                  B(3,2) = 0
+                  B(3,3) = l_f*F_psi
+                  B(3,4) = 0
+
+                  B(4,1) = 0
+                  B(4,2) = 0
+                  B(4,3) = 0
+                  B(4,4) = l_f*F_psi
+
+               end associate
+
+            end if
+
+            i = i + 4
+
+         end do block_loop
+
+      end associate
+
+      ! Finish
+      
+      return
+
+   end subroutine eval_A01_matrix
+   
+   !****
+
+   subroutine eval_A10_matrix(N, pa, A)
+
+      integer, intent(in)        :: N
+      type(params_t), intent(in) :: pa
+      real(RD), intent(out)      :: A(:,:)
+
+      integer :: i
+      integer :: m
+
+      @:CHECK_BOUNDS(SIZE(A, 1),4*(2*N+1))
+      @:CHECK_BOUNDS(SIZE(A, 2),4*(2*N+1))
+
+      ! Evaluate the matrix
+
+      i = 1
+
+      A = 0._RD
+
+      associate( &
+         H_B => pa%H_B)
+         
+         block_loop: do m = -N, N
+
+            associate(B => A(i:i+3,i:i+3))
+
+               B(1,1) = 0
+               B(1,2) = 0
+               B(1,3) = 0
+               B(1,4) = -H_B
+
+               B(2,1) = 0
+               B(2,2) = 0
+               B(2,3) = 0
+               B(2,4) = 0
+
+               B(3,1) = 0
+               B(3,2) = 0
+               B(3,3) = 0
+               B(3,4) = 0
+
+               B(4,1) = 1
+               B(4,2) = 0
+               B(4,3) = 0
+               B(4,4) = 0
+
+            end associate
+
+            i = i + 4
+
+         end do block_loop
+
+      end associate
+
+      ! Finish
+      
+      return
+
+   end subroutine eval_A10_matrix
+   
+   !****
+
+   subroutine eval_A11_matrix(N, pa, A)
+
+      integer, intent(in)        :: N
+      type(params_t), intent(in) :: pa
+      real(RD), intent(out)      :: A(:,:)
+
+
+      @:CHECK_BOUNDS(SIZE(A, 1),4*(2*N+1))
+      @:CHECK_BOUNDS(SIZE(A, 2),4*(2*N+1))
+
+      ! Evaluate the matrix
+
+      A = 0._RD
+
+      ! Finish
+
+      return
+
+   end subroutine eval_A11_matrix
+
+   !****
+
+   subroutine eval_A02_matrix(N, pa, A)
+
+      integer, intent(in)        :: N
+      type(params_t), intent(in) :: pa
+      real(RD), intent(out)      :: A(:,:)
+
+      @:CHECK_BOUNDS(SIZE(A, 1),4*(2*N+1))
+      @:CHECK_BOUNDS(SIZE(A, 2),4*(2*N+1))
+
+      ! Evaluate the matrix
+
+      A = 0._RD
+
+      ! Finish
+
+      return
+
+   end subroutine eval_A02_matrix
+
+   !****
+
+   subroutine eval_A20_matrix(N, pa, A)
+
+      integer, intent(in)        :: N
+      type(params_t), intent(in) :: pa
+      real(RD), intent(out)      :: A(:,:)
+
+      integer :: i
+      integer :: m
+
+      @:CHECK_BOUNDS(SIZE(A, 1),4*(2*N+1))
+      @:CHECK_BOUNDS(SIZE(A, 2),4*(2*N+1))
+
+      ! Evaluate the matrix
+
+      i = 1
+
+      A = 0._RD
+
+      associate( &
+         Pr => pa%Pr, &
+         tau => pa%tau, &
+         D_B => pa%D_B, &
+         l_f => pa%l_f)
+
+         block_loop: do m = -N, N
+
+            associate(B => A(i:i+3,i:i+3))
+
+               if (m /= 0) then
+
+                  B(1,1) = -Pr
+                  B(1,2) = -Pr/(m**3*l_f**3)
+                  B(1,3) = Pr/(m**3*l_f**3)
+                  B(1,4) = 0
+
+               else
+
+                  B(1,1) = -Pr
+                  B(1,2) = 0
+                  B(1,3) = 0
+                  B(1,4) = 0
+
+               end if
+
+               B(2,1) = 0
+               B(2,2) = -1
+               B(2,3) = 0
+               B(2,4) = 0
+
+               B(3,1) = 0
+               B(3,2) = 0
+               B(3,3) = -tau
+               B(3,4) = 0
+
+               B(4,1) = 0
+               B(4,2) = 0
+               B(4,3) = 0
+               B(4,4) = -D_B
+
+            end associate
+
+            i = i + 4
+
+         end do block_loop
+
+      end associate
+
+      ! Finish
+
+      return
+
+   end subroutine eval_A20_matrix
+
+end module pert_expand_m

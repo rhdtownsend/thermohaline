@@ -1,0 +1,119 @@
+#:include 'forum.inc'
+
+module linalg_m
+
+   ! Uses
+
+   use forum_m
+
+   use f95_lapack
+
+   use ISO_FORTRAN_ENV
+
+   ! No implicit typing
+
+   implicit none
+
+   ! Accessibility
+
+   private
+
+   public :: solve_eigen
+
+contains
+
+   subroutine solve_eigen(A, sig, XL, XR)
+
+      real(RD), intent(in)               :: A(:,:)
+      complex(RD), intent(out)           :: sig(:)
+      complex(RD), intent(out), optional :: XL(:,:)
+      complex(RD), intent(out), optional :: XR(:,:)
+
+      real(RD)    :: A_tmp(SIZE(A, 1),SIZE(A, 1))
+      real(RD)    :: sig_re(SIZE(A, 1))
+      real(RD)    :: sig_im(SIZE(A, 1))
+      real(RD)    :: XL_reim(SIZE(A, 1), SIZE(A, 1))
+      real(RD)    :: XR_reim(SIZE(A, 1), SIZE(A, 1))
+      complex(RD) :: XL_(SIZE(A, 1), SIZE(A, 1))
+      complex(RD) :: XR_(SIZE(A, 1), SIZE(A, 1))
+      integer     :: i
+
+      @:CHECK_BOUNDS(SIZE(A, 2), SIZE(A, 1))
+
+      @:CHECK_BOUNDS(SIZE(sig), SIZE(A, 1))
+
+      if (PRESENT(XL)) then
+         @:CHECK_BOUNDS(SIZE(XL, 1), SIZE(A, 1))
+         @:CHECK_BOUNDS(SIZE(XL, 2), SIZE(A, 1))
+      end if
+
+      if (PRESENT(XR)) then
+         @:CHECK_BOUNDS(SIZE(XR, 1), SIZE(A, 1))
+         @:CHECK_BOUNDS(SIZE(XR, 2), SIZE(A, 1))
+      end if
+
+      ! Solve the eigenproblem to find eigenvalues and left/right
+      ! eigenvectors
+
+      A_tmp = A
+
+      call LA_GEEV(A_tmp, sig_re, sig_im, XL_reim, XR_reim)
+
+      sig = CMPLX(sig_re, sig_im, KIND=RD)
+
+      ! If required, extract eigenvectors
+
+      if (PRESENT(XL) .OR. PRESENT(XR)) then
+
+         i = 1
+
+         do
+
+            if (i > SIZE(A, 1)) exit
+
+            if (sig_im(i) == 0._RD) then
+
+               ! Simple eigenvectors
+
+               XL_(:,i) = XL_reim(:,i)
+               XR_(:,i) = XR_reim(:,i)
+
+               i = i + 1
+
+            else
+
+               ! Complex eigenvectors
+
+               XL_(:,i)   = CMPLX(XL_reim(:,i),  XL_reim(:,i+1), KIND=RD)
+               XL_(:,i+1) = CMPLX(XL_reim(:,i), -XL_reim(:,i+1), KIND=RD)
+
+               XR_(:,i)   = CMPLX(XR_reim(:,i),  XR_reim(:,i+1), KIND=RD)
+               XR_(:,i+1) = CMPLX(XR_reim(:,i), -XR_reim(:,i+1), KIND=RD)
+
+               i = i + 2
+
+            end if
+
+         end do
+
+         ! Rescale left eigenvectors so left^H-right pairs have a dot produce of unity
+         ! (don't forget that DOT_PRODUCT takes the complex conjugate of the first argument!)
+
+         do i = 1, SIZE(A, 1)
+            XL_(:,i) = XL_(:,i)/DOT_PRODUCT(XL_(:,i), XR_(:,i))
+         end do
+
+         ! Store eigenvectors for return
+
+         if (PRESENT(XL)) XL = XL_
+         if (PRESENT(XR)) XR = XR_
+
+      end if
+
+      ! Finish
+
+      return
+
+   end subroutine solve_eigen
+
+end module linalg_m

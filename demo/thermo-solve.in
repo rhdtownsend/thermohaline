@@ -1,0 +1,18 @@
+&params
+  k_z_min = 1e-9
+  k_z_max = 1e3
+  n_k_z = 1000
+  log_k_z = .true.        
+  rescale_k_z_min = .true.
+  rescale_k_z_max = .true.
+  Pr =  1e-6
+  tau =  1e-7
+  R_0 =  0.1e7
+  H_B =  1e-5
+  D_B =  1e-5
+  N = 17
+  use_mesa = .true.
+  split = .true.
+  reorder = .true.
+  out_file = 'thermo-solve.h5'
+/  

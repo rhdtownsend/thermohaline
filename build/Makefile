@@ -3,7 +3,7 @@
 
 # Targets
 
-BIN_TARGETS = thermo_gersh thermo_solve thermo_scan_1d thermo_scan_2d
+BIN_TARGETS = thermo_gersh thermo_solve thermo_scan_1d thermo_scan_2d pert_expand
 
 # Source file lists & related variables
 #
@@ -11,21 +11,25 @@ BIN_TARGETS = thermo_gersh thermo_solve thermo_scan_1d thermo_scan_2d
 # xxx_USES = source files providing modules USE'd by xxx
 # xxx_LIBS = library files required to link xxx
 
-thermo_scan_1d_SRCS = thermo_scan_1d.fypp thermo_m.fypp params_m.fypp matrix_m.fypp finger_m.fypp parasite_model_matrices.fypp
+thermo_scan_1d_SRCS = thermo_scan_1d.fypp thermo_m.fypp params_m.fypp matrix_m.fypp finger_m.fypp parasite_model_matrices.fypp linalg_m.fypp
 thermo_scan_1d_USES = 
 thermo_scan_1d_LIBS = 
 
-thermo_gersh_SRCS = thermo_gersh.fypp thermo_m.fypp params_m.fypp matrix_m.fypp finger_m.fypp parasite_model_matrices.fypp
+thermo_scan_2d_SRCS = thermo_scan_2d.fypp thermo_m.fypp params_m.fypp matrix_m.fypp finger_m.fypp parasite_model_matrices.fypp linalg_m.fypp
+thermo_scan_2d_USES = 
+thermo_scan_2d_LIBS =
+
+thermo_gersh_SRCS = thermo_gersh.fypp thermo_m.fypp params_m.fypp matrix_m.fypp finger_m.fypp parasite_model_matrices.fypp linalg_m.fypp
 thermo_gersh_USES = 
 thermo_gersh_LIBS =
 
-thermo_solve_SRCS = thermo_solve.fypp thermo_solve_m.fypp thermo_m.fypp params_m.fypp matrix_m.fypp finger_m.fypp parasite_model_matrices.fypp root_m.fypp
+thermo_solve_SRCS = thermo_solve.fypp thermo_solve_m.fypp thermo_m.fypp params_m.fypp matrix_m.fypp finger_m.fypp parasite_model_matrices.fypp linalg_m.fypp root_m.fypp
 thermo_solve_USES = 
 thermo_solve_LIBS =
 
-thermo_scan_2d_SRCS = thermo_scan_2d.fypp thermo_m.fypp params_m.fypp matrix_m.fypp finger_m.fypp parasite_model_matrices.fypp
-thermo_scan_2d_USES = 
-thermo_scan_2d_LIBS =
+pert_expand_SRCS = pert_expand.fypp pert_expand_m.fypp params_m.fypp finger_m.fypp linalg_m.fypp
+pert_expand_USES = 
+pert_expand_LIBS =
 
 # Build flags
 

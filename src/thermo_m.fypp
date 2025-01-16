@@ -7,6 +7,7 @@ module thermo_m
    use forum_m, split_ => split
    use params_m
    use matrix_m
+   use linalg_m
 
    use f95_lapack
 
@@ -63,8 +64,6 @@ contains
       integer               :: s
       real(RD), allocatable :: A(:,:)
       real(RD)              :: sig_shift
-      real(RD), allocatable :: wr(:)
-      real(RD), allocatable :: wi(:)
       integer, allocatable  :: ipiv(:)
       real(RD), allocatable :: work(:)
       integer               :: info
@@ -81,11 +80,11 @@ contains
          s = 2*(2*N+1)
 
          allocate(A(s,s))
-         allocate(wr(s))
-         allocate(wi(s))
 
          allocate(ipiv(s))
          allocate(work(2*s))
+
+         ! Even parity
 
          call eval_matrix(N, pa, A, parity=.TRUE., use_mesa=use_mesa)
 
@@ -105,13 +104,15 @@ contains
             A = A(s:1:-1,s:1:-1)
          end if
 
-         call LA_GEEV(A, wr, wi)
+         call solve_eigen(A, sig(1::2))
 
          if (invert) then
-            sig(1::2) = 1._RD/CMPLX(wr, wi, KIND=RD) + sig_shift
+            sig(1::2) = 1._RD/sig(1::2) + sig_shift
          else
-            sig(1::2) = CMPLX(wr, wi, KIND=RD) + sig_shift
+            sig(1::2) = sig(1::2) + sig_shift
          end if
+
+         ! Odd parity
          
          call eval_matrix(N, pa, A, parity=.FALSE., use_mesa=use_mesa)
 
@@ -151,21 +152,21 @@ contains
 
          end if
 
-         call LA_GEEV(A, wr, wi)
+         call solve_eigen(A, sig(2::2))
 
          if (invert) then
-            sig(2::2) = 1._RD/CMPLX(wr, wi, KIND=RD) + sig_shift
+            sig(2::2) = 1._RD/sig(2::2) + sig_shift
          else
-            sig(2::2) = CMPLX(wr, wi, KIND=RD) + sig_shift
+            sig(2::2) = sig(2::2) + sig_shift
          end if
 
       else
 
+         ! Full matrix
+
          s = 4*(2*N+1)
 
          allocate(A(s,s))
-         allocate(wr(s))
-         allocate(wi(s))
 
          allocate(ipiv(s))
          allocate(work(2*s))
@@ -212,12 +213,12 @@ contains
 
          end if
 
-         call LA_GEEV(A, wr, wi)
+         call solve_eigen(A, sig)
 
          if (invert) then
-            sig = 1._RD/CMPLX(wr, wi, KIND=RD) + sig_shift
+            sig = 1._RD/sig + sig_shift
          else
-            sig = CMPLX(wr, wi, KIND=RD) + sig_shift
+            sig = sig + sig_shift
          end if
 
       end if
@@ -307,20 +308,20 @@ contains
 
          ! Handle the first 2x2 block
 
-         call solve_eigen(2, A_0(1:2,1:2), sig(1:2), XL(1:2,1:2), XR(1:2,1:2))
+         call solve_eigen(A_0(1:2,1:2), sig(1:2), XL(1:2,1:2), XR(1:2,1:2))
 
          ! Handle the other blocks
 
          i = 3
 
          do m = 1, N
-            call solve_eigen(4, A_0(i:i+3,i:i+3), sig(i:i+3), XL(i:i+3,i:i+3), XR(i:i+3,i:i+3))
+            call solve_eigen(A_0(i:i+3,i:i+3), sig(i:i+3), XL(i:i+3,i:i+3), XR(i:i+3,i:i+3))
             i = i + 4
          end do
 
       else
 
-         call solve_eigen(2*(2*N+1), A_0, sig, XL, XR)
+         call solve_eigen(A_0, sig, XL, XR)
 
       end if
 
@@ -346,268 +347,5 @@ contains
       sig = sig + w_f**2*dsig
 
    end subroutine pert_expand
-
-   !****
-
-   subroutine solve_eigen(n, A, sig, XL, XR)
-
-      integer, intent(in)      :: n
-      real(RD), intent(in)     :: A(:,:)
-      complex(RD), intent(out) :: sig(:)
-      complex(RD), intent(out) :: XL(:,:)
-      complex(RD), intent(out) :: XR(:,:)
-
-      real(RD) :: A_tmp(n,n)
-      real(RD) :: sig_re(n)
-      real(RD) :: sig_im(n)
-      real(RD) :: XL_reim(n,n)
-      real(RD) :: XR_reim(n,n)
-      integer  :: i
-
-      @:CHECK_BOUNDS(SIZE(A, 1), n)
-      @:CHECK_BOUNDS(SIZE(A, 2), n)
-
-      @:CHECK_BOUNDS(SIZE(sig), n)
-      
-      @:CHECK_BOUNDS(SIZE(XL, 1), n)
-      @:CHECK_BOUNDS(SIZE(XL, 2), n)
-      
-      @:CHECK_BOUNDS(SIZE(XR, 1), n)
-      @:CHECK_BOUNDS(SIZE(XR, 2), n)
-      
-      ! Solve the eigenproblem to find eigenvalues and left/right
-      ! eigenvectors (stored as column vectors in the XL/XR matrices,
-      ! respectively)
-
-      A_tmp = A
-
-      call LA_GEEV(A_tmp, sig_re, sig_im, XL_reim, XR_reim)
-
-      sig = CMPLX(sig_re, sig_im, KIND=RD)
-
-      XL(:,1::2) = CMPLX(XL_reim(:,1::2),  XL_reim(:,2::2), KIND=RD)
-      XL(:,2::2) = CMPLX(XL_reim(:,1::2), -XL_reim(:,2::2), KIND=RD)
-
-      XR(:,1::2) = CMPLX(XR_reim(:,1::2),  XR_reim(:,2::2), KIND=RD)
-      XR(:,2::2) = CMPLX(XR_reim(:,1::2), -XR_reim(:,2::2), KIND=RD)
-
-      ! Rescale left eigenvectors so left-right pairs have a dot produce of unity
-
-      do i = 1, n
-         XL(:,i) = XL(:,i)/DOT_PRODUCT(XL(:,i), XR(:,i))
-      end do
-
-      ! Check that XL and XR^T are (almost) inverses
-
-      !associate (P => MATMUL(TRANSPOSE(CONJG(XL)), XR))
-      !   print *,'range:', MINVAL(REAL(P)), MAXVAL(REAL(P)), MINVAL(AIMAG(P)), MAXVAL(AIMAG(P))
-      !end associate
-
-   end subroutine solve_eigen
-
-   ! !****
-
-   ! subroutine eigen_max(N, pa, sig_max)
-
-   !    integer, intent(in)        :: N
-   !    type(params_t), intent(in) :: pa
-   !    complex(RD), intent(out)   :: sig_max
-
-   !    integer, parameter  :: NEV = 1
-   !    integer, parameter  :: NCV = 2*NEV + 1
-   !    integer, parameter  :: LWORKL = 3*NCV**2 + 6*NCV
-   !    real(RD), parameter :: TOL = 1E-6_RD
-
-   !    integer  :: ido
-   !    integer  :: iparam(11)
-   !    integer  :: ipntr(14)
-   !    real(RD) :: resid(4*(2*N+1))
-   !    real(RD) :: v(4*(2*N+1),NCV)
-   !    real(RD) :: workd(3*4*(2*N+1))
-   !    real(RD) :: workl(LWORKL)
-   !    integer  :: info
-   !    real(RD) :: dr(NEV+1)
-   !    real(RD) :: di(NEV+1)
-   !    real(RD) :: z(4*(2*N+1),NEV+1)
-   !    real(RD) :: workev(3*NCV)
-   !    logical  :: select(NCV)
-   !    integer  :: ierr
-
-   !    ! Find the maximal eigenvalue
-
-   !    ! First set up parameters
-
-   !    iparam = 0
-
-   !    iparam(1) = 1
-   !    iparam(3) = 300
-   !    iparam(7) = 1
-
-   !    ido = 0
-   !    info = 0
-
-   !    iter_loop : do
-
-   !       call DNAUPD(ido, 'I', 4*(2*N+1), 'LR', NEV, TOL, resid, &
-   !          NCV, v, SIZE(v, 1), iparam, ipntr, workd, workl, LWORKL, &
-   !          info)
-
-   !       if (ido == -1 .OR. ido == 1) then
-
-   !          associate( &
-   !             x => workd(ipntr(1):ipntr(1)+4*(2*N+1)-1), &
-   !             y => workd(ipntr(2):ipntr(2)+4*(2*N+1)-1))
-
-   !             call eval_prod(N, pa, x, y)
-
-   !          end associate
-
-   !       else
-
-   !          exit iter_loop
-
-   !       end if
-
-   !    end do iter_loop
-
-   !    ! Check for convergence
-
-   !    if (info < 0) then
-
-   !       print *, ' '
-   !       print *, ' Error with _naupd, info = ', info
-   !       print *, ' Check the documentation of _naupd'
-   !       print *, ' '
-   !       stop
-
-   !    else
-
-   !       call DNEUPD(.FALSE., 'A', select, dr, di, z, SIZE(z, 1), &
-   !          0._RD, 0._RD, workev, 'I', 4*(2*N+1), 'LR', NEV, TOL, &
-   !          resid, NCV, v, SIZE(v, 1), iparam, ipntr, workd, workl, &
-   !          LWORKL, ierr)
-
-   !       if (ierr /= 0) then
-
-   !          print *, ' '
-   !          print *, ' Error with _neupd, info = ', ierr
-   !          print *, ' Check the documentation of _neupd. '
-   !          print *, ' '
-   !          stop
-
-   !       end if
-         
-   !    endif
-
-   !    ! Store the eigenvalue
-
-   !    sig_max = CMPLX(dr(1), di(1), KIND=RD)
-
-   !    print *,sig_max
-
-   ! end subroutine eigen_max
-
-   ! !****
-
-   ! subroutine eigen_close(N, pa, sig_shift, sig_close)
-      
-   !    integer, intent(in)        :: N
-   !    type(params_t), intent(in) :: pa
-   !    complex(RD), intent(in)    :: sig_shift
-   !    complex(RD), intent(out)   :: sig_close
-
-   !    integer, parameter  :: NEV = 1
-   !    integer, parameter  :: NCV = 2*NEV + 1
-   !    integer, parameter  :: LWORKL = 3*NCV**2 + 6*NCV
-   !    real(RD), parameter :: TOL = 1E-6_RD
-
-   !    integer  :: ido
-   !    integer  :: iparam(11)
-   !    integer  :: ipntr(14)
-   !    real(RD) :: resid(4*(2*N+1))
-   !    real(RD) :: v(4*(2*N+1),NCV)
-   !    real(RD) :: workd(3*4*(2*N+1))
-   !    real(RD) :: workl(LWORKL)
-   !    integer  :: info
-   !    real(RD) :: dr(NEV+1)
-   !    real(RD) :: di(NEV+1)
-   !    real(RD) :: z(4*(2*N+1),NEV+1)
-   !    real(RD) :: workev(3*NCV)
-   !    logical  :: select(NCV)
-   !    integer  :: ierr
-
-   !    ! Find the maximal eigenvalue
-
-   !    ! First set up parameters
-
-   !    iparam = 0
-
-   !    iparam(1) = 1
-   !    iparam(3) = 300
-   !    iparam(7) = 1
-
-   !    ido = 0
-   !    info = 0
-
-   !    iter_loop : do
-
-   !       call DNAUPD(ido, 'I', 4*(2*N+1), 'SR', NEV, TOL, resid, &
-   !          NCV, v, SIZE(v, 1), iparam, ipntr, workd, workl, LWORKL, &
-   !          info)
-
-   !       if (ido == -1 .OR. ido == 1) then
-
-   !          associate( &
-   !             x => workd(ipntr(1):ipntr(1)+4*(2*N+1)-1), &
-   !             y => workd(ipntr(2):ipntr(2)+4*(2*N+1)-1))
-
-   !             call eval_prod(N, pa, x, y)
-
-   !          end associate
-
-   !       else
-
-   !          exit iter_loop
-
-   !       end if
-
-   !    end do iter_loop
-
-   !    ! Check for convergence
-
-   !    if (info < 0) then
-
-   !       print *, ' '
-   !       print *, ' Error with _naupd, info = ', info
-   !       print *, ' Check the documentation of _naupd'
-   !       print *, ' '
-   !       stop
-
-   !    else
-
-   !       call DNEUPD(.FALSE., 'A', select, dr, di, z, SIZE(z, 1), &
-   !          0._RD, 0._RD, workev, 'I', 4*(2*N+1), 'LM', NEV, TOL, &
-   !          resid, NCV, v, SIZE(v, 1), iparam, ipntr, workd, workl, &
-   !          LWORKL, ierr)
-
-   !       if (ierr /= 0) then
-
-   !          print *, ' '
-   !          print *, ' Error with _neupd, info = ', ierr
-   !          print *, ' Check the documentation of _neupd. '
-   !          print *, ' '
-   !          stop
-
-   !       end if
-         
-   !    endif
-
-   !    ! Store the eigenvalue
-
-   !    sig_close = CMPLX(dr(1), di(1), KIND=RD)
-
-   !    print *,sig_close
-
-   ! end subroutine eigen_close
 
 end module thermo_m

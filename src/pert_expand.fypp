@@ -1,0 +1,248 @@
+#:include 'forum.inc'
+
+program pert_expand
+
+   ! Uses
+
+   use forum_m, split_ => split
+   use params_m
+   use finger_m
+   use linalg_m
+   use pert_expand_m
+   
+   use ISO_FORTRAN_ENV
+   use IEEE_ARITHMETIC
+   use f95_lapack
+
+   ! No implicit typing
+
+   implicit none
+
+   ! Variables
+
+   character(:), allocatable :: nml_file
+
+   integer                  :: unit
+   real(RD)                 :: R_0
+   real(RD)                 :: Pr
+   real(RD)                 :: tau
+   real(RD)                 :: H_B
+   real(RD)                 :: D_B
+   integer                  :: N
+   character(256)           :: out_file
+
+   real(RD)                 :: lam_f
+   real(RD)                 :: l_f
+   type(params_t)           :: pa
+   integer                  :: d
+   real(RD), allocatable    :: A00(:,:)
+   real(RD), allocatable    :: A01(:,:)
+   real(RD), allocatable    :: A10(:,:)
+   real(RD), allocatable    :: A11(:,:)
+   real(RD), allocatable    :: A02(:,:)
+   real(RD), allocatable    :: A20(:,:)
+   complex(RD), allocatable :: sig00(:)
+   complex(RD), allocatable :: XL(:,:)
+   complex(RD), allocatable :: XR(:,:)
+   integer                  :: m
+   integer                  :: i
+   integer                  :: j
+!   complex(RD), allocatable :: X_chk(:,:)
+   complex(RD), allocatable :: V01(:,:)
+   complex(RD), allocatable :: V10(:,:)
+   complex(RD), allocatable :: V11(:,:)
+   complex(RD), allocatable :: V02(:,:)
+   complex(RD), allocatable :: V20(:,:)
+   complex(RD), allocatable :: sig01(:)
+   complex(RD), allocatable :: sig10(:)
+   complex(RD), allocatable :: sig11(:)
+   complex(RD), allocatable :: sig02(:)
+   complex(RD), allocatable :: sig20(:)
+   complex(RD)              :: T11
+   complex(RD)              :: T02
+   complex(RD)              :: T20
+   type(hdf5io_t)           :: hdf5io
+
+   namelist /params/ &
+      R_0, Pr, tau, H_B, D_B, &
+      N, out_file
+
+   ! Read arguments
+
+   @:ASSERT(n_arg() == 1,'Syntax: pert_expand nml_file')
+
+   call get_arg(1, nml_file)
+
+   ! Read namelist parameters
+
+   R_0 = 1.
+   Pr = 1.
+   tau = 1.
+   Pr = 1.
+   
+   H_B = 1.
+   D_B = 1.
+
+   N = 17
+
+   open(NEWUNIT=unit, STATUS='OLD', FILE=nml_file)
+   read(unit, NML=params)
+   close(unit)
+
+   print *,'R_0   :', R_0
+   print *,'Pr    :', Pr
+   print *,'tau   :', tau
+   print *,'H_B   :', H_B
+   print *,'D_B   :', D_B
+   print *,'N     :', N
+
+   ! Solve for fingering-instability parameters
+
+   call solve_finger(R_0, Pr, tau, lam_f, l_f)
+
+   print *,'lam_f :', lam_f
+   print *,'l_f   :', l_f
+
+   ! Build the A matrices
+
+   pa = params_t(R_0, Pr, tau, H_B, D_B, 0._RD, 0._RD)
+
+   pa%lam_f = lam_f
+   pa%l_f = l_f
+
+   d = 4*(2*N+1)
+
+   allocate(A00(d,d))
+   allocate(A01(d,d))
+   allocate(A10(d,d))
+   allocate(A11(d,d))
+   allocate(A02(d,d))
+   allocate(A20(d,d))
+
+   call eval_A00_matrix(N, pa, A00)
+   call eval_A01_matrix(N, pa, A01)
+   call eval_A10_matrix(N, pa, A10)
+   call eval_A11_matrix(N, pa, A11)
+   call eval_A02_matrix(N, pa, A02)
+   call eval_A20_matrix(N, pa, A20)
+
+   ! Diagonalize A00
+
+   allocate(sig00(d))
+
+   allocate(XL(d,d))
+   allocate(XR(d,d))
+
+   XL = 0
+   XR = 0
+
+   i = 1
+
+   block_loop : do m = -N, N
+
+      associate(A => A00(i:i+3,i:i+3), sig => sig00(i:i+3), XL_ => XL(i:i+3,i:i+3), XR_ => XR(i:i+3,i:i+3))
+         call solve_eigen(A, sig, XL_, XR_)
+      end associate
+
+      i = i + 4
+
+   end do block_loop
+
+   ! Sanity check
+
+!   X_chk = MATMUL(CONJG(TRANSPOSE(XL)), XR)
+
+!   do i = 1, d
+!      print 100,ABS(X_chk(i,:))
+!100   format(999F6.2)
+!   end do
+
+   ! Now evaluate the V matrices
+
+   V01 = MATMUL(CONJG(TRANSPOSE(XL)), MATMUL(A01, XR))
+   V10 = MATMUL(CONJG(TRANSPOSE(XL)), MATMUL(A10, XR))
+   V11 = MATMUL(CONJG(TRANSPOSE(XL)), MATMUL(A11, XR))
+   V02 = MATMUL(CONJG(TRANSPOSE(XL)), MATMUL(A02, XR))
+   V20 = MATMUL(CONJG(TRANSPOSE(XL)), MATMUL(A20, XR))
+
+   ! Evaluate the sigma terms
+
+   allocate(sig01(d))
+   allocate(sig10(d))
+   allocate(sig11(d))
+   allocate(sig02(d))
+   allocate(sig20(d))
+
+   do i = 1, d
+
+      sig01(i) = V01(i,i)
+
+      sig10(i) = V10(i,i)
+
+      sig11(i) = V11(i,i)
+      sig02(i) = V02(i,i)
+      sig20(i) = V20(i,i)
+
+      do j = 1, d
+
+         if (j /= i) then
+
+            T11 = V01(i,j)*V10(j,i) + V10(i,j)*V01(j,i)
+            T02 = V01(i,j)*V01(j,i)
+            T20 = V10(i,j)*V10(j,i)
+
+            if (T11 /= 0._RD) then
+               if (sig00(i) /= sig00(j)) then
+                  sig11(i) = sig11(i) + T11/(sig00(i) - sig00(j))
+               else
+                  sig11(i) = IEEE_VALUE(0._RD, IEEE_POSITIVE_INF)
+               end if
+            end if
+
+            if (T02 /= 0._RD) then
+               if (sig00(i) /= sig00(j)) then
+                  sig02(i) = sig02(i) + T02/(sig00(i) - sig00(j))
+               else
+                  sig02(i) = IEEE_VALUE(0._RD, IEEE_POSITIVE_INF)
+               end if
+            end if
+
+            if (T20 /= 0._RD) then
+               if (sig00(i) /= sig00(j)) then
+                  sig20(i) = sig20(i) + T20/(sig00(i) - sig00(j))
+               else
+                  sig20(i) = IEEE_VALUE(0._RD, IEEE_POSITIVE_INF)
+               end if
+            end if
+
+         end if
+
+      end do
+
+   end do
+
+   ! Write out results
+
+   hdf5io = hdf5io_t(out_file, CREATE_FILE)
+
+   call hdf5io%write_attr('Pr', Pr)
+   call hdf5io%write_attr('tau', tau)
+   call hdf5io%write_attr('R_0', R_0)
+   call hdf5io%write_attr('H_B', H_B)
+   call hdf5io%write_attr('D_B', D_B)
+   call hdf5io%write_attr('lam_f', lam_f)
+   call hdf5io%write_attr('l_f', l_f)
+   call hdf5io%write_attr('N', N)
+
+   call hdf5io%write_dset('sig00', sig00)
+   call hdf5io%write_dset('sig01', sig01)
+   call hdf5io%write_dset('sig10', sig10)
+   call hdf5io%write_dset('sig11', sig11)
+   call hdf5io%write_dset('sig02', sig02)
+   call hdf5io%write_dset('sig20', sig20)
+
+   call hdf5io%final()
+
+   ! Finish
+
+end program pert_expand

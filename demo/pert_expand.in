@@ -1,0 +1,9 @@
+&params
+  Pr =  1e-6
+  tau =  1e-7
+  R_0 =  0.1e7
+  H_B =  1e-5
+  D_B =  1e-5
+  N = 17
+  out_file = 'pert_expand.h5'
+/  

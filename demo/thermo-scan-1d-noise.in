@@ -1,0 +1,24 @@
+&params
+  scan_var_name = 'k_z'
+  scan_var_min = 1e-7
+  scan_var_max = 1e0
+  n_scan_var = 25000
+  log_scan_var = .true.
+  rescale_scan_var_min = .true.
+  rescale_scan_var_max = .true.
+  Pr =  1.6239210035454995E-010
+!  Pr =  1.6239210035454995E-08
+  tau =  5.2868944831444755E-015
+  R_0 =  188956028554864.66
+  H_B =  6.8108821736170655E-009
+  D_B =  1.6038348194634774E-009
+  w_f = 1e-4
+  N = 17
+  split = .true.
+  shift = .false.
+  invert = .false.
+  reorder = .true.
+  use_mesa = .true.
+  partition = .true.
+  out_file = 'thermo-noise.h5'
+/  

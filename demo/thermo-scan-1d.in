@@ -1,0 +1,22 @@
+&params
+  scan_var_name = 'k_z'
+  scan_var_min = 1e-9
+  scan_var_max = 1e3
+  n_scan_var = 5000
+  log_scan_var = .true.
+  rescale_scan_var_min = .true.
+  rescale_scan_var_max = .true.
+  Pr =  1e-6
+  tau =  1e-7
+  R_0 =  0.1e7
+  H_B =  1e-5
+  D_B =  1e-5
+  w_f = 3.6e-3
+  N = 17
+  split = .true.
+  shift = .false.
+  invert = .false.
+  reorder = .true.
+  use_mesa = .true.
+  out_file = 'thermo-scan.h5'
+/  

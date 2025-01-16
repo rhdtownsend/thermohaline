@@ -1,0 +1,17 @@
+&params
+  k_z_min = 1e-12
+  k_z_max = 1e0
+  n_k_z = 2500           
+  log_k_z = .true.        
+  rescale_k_z_min = .true.
+  rescale_k_z_max = .true.k
+  Pr =  1.6239210035454995E-010
+!  Pr =  1.6239210035454995E-08
+  tau =  5.2868944831444755E-015
+  R_0 =  188956028554864.66
+  H_B =  6.8108821736170655E-009
+  D_B =  1.6038348194634774E-009
+  N = 17
+  use_mesa = .true.
+  out_file = 'thermo-gersh.h5'
+/  

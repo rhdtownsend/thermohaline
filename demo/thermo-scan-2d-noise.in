@@ -1,0 +1,24 @@
+&params
+  k_z_min = 1e-10
+  k_z_max = 1e-1
+  n_k_z = 1000
+  log_k_z = .true.
+  rescale_k_z_min = .true.
+  rescale_k_z_max = .true.
+  w_f_min = 1e-12
+  w_f_max = 1e-5
+  n_w_f = 1000
+  log_w_f = .true.
+  Pr =  1.6239210035454995E-010
+  tau =  5.2868944831444755E-015
+  R_0 =  188956028554864.66
+  H_B =  6.8108821736170655E-009
+  D_B =  1.6038348194634774E-009
+  N = 17
+  split = .true.
+  shift = .false.
+  invert = .false.
+  reorder = .true.
+  use_mesa = .true.
+  out_file = 'thermo-scan-2d.h5'
+/  
