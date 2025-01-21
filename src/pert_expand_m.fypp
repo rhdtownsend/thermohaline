@@ -123,8 +123,8 @@ contains
          lam_f => pa%lam_f)
 
          F_psi = 1/(2*l_f)
-         F_T = -l_f*F_psi/(lam_f**2 + l_f**2)
-         F_C = -l_f*F_psi/(R_0*(lam_f**2 + tau*l_f**2))
+         F_T = -l_f*F_psi/(lam_f + l_f**2)
+         F_C = -l_f*F_psi/(R_0*(lam_f + tau*l_f**2))
          
          block_loop: do m = -N, N
 

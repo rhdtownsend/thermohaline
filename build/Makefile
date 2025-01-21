@@ -27,7 +27,7 @@ thermo_solve_SRCS = thermo_solve.fypp thermo_solve_m.fypp thermo_m.fypp params_m
 thermo_solve_USES = 
 thermo_solve_LIBS =
 
-pert_expand_SRCS = pert_expand.fypp pert_expand_m.fypp params_m.fypp finger_m.fypp linalg_m.fypp
+pert_expand_SRCS = pert_expand.fypp pert_expand_m.fypp params_m.fypp finger_m.fypp linalg_m.fypp matrix_m.fypp parasite_model_matrices.fypp
 pert_expand_USES = 
 pert_expand_LIBS =
 
