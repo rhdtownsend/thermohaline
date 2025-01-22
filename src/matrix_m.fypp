@@ -115,7 +115,6 @@ contains
       real(RD), intent(out)         :: B(:,:)
 
       real(RD) :: k2_m
-      real(RD) :: k2_m_m
       real(RD) :: k2_diff
 
       @:CHECK_BOUNDS(SIZE(B, 1),4)
@@ -183,7 +182,6 @@ contains
       real(RD), intent(out)         :: B(:,:)
 
       real(RD) :: k2_m
-      real(RD) :: k2_m_p
       real(RD) :: k2_diff
       
       @:CHECK_BOUNDS(SIZE(B, 1),4)
