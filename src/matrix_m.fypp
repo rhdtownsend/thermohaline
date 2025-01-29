@@ -5,7 +5,11 @@ module matrix_m
    ! Uses
 
    use forum_m
+   use flags_m
    use params_m
+   use matrix_full_m
+   use matrix_lpn_m
+   use matrix_lpn_qs_m
 
    use parasite_model_matrices
 
@@ -19,433 +23,181 @@ module matrix_m
 
    private
 
+   public :: get_matrix_dim
    public :: eval_matrix
-!   public :: eval_prod
 
 contains
 
-   subroutine eval_block_m(N, m, pa, B)
+   subroutine get_matrix_dim(N, fl, D, parity)
 
       integer, intent(in)           :: N
-      integer, intent(in)           :: m
-      type(params_t), intent(in)    :: pa
-      real(RD), intent(out)         :: B(:,:)
+      type(flags_t), intent(in)     :: fl
+      integer, intent(out)          :: D
+      logical, intent(in), optional :: parity
 
-      real(RD) :: k2_m
-
-      @:CHECK_BOUNDS(SIZE(B, 1),4)
-      @:CHECK_BOUNDS(SIZE(B, 2),4)
-
-      @:ASSERT_DEBUG(m >= -N .AND. M <= N,'invalid m')
-
-      ! Evaluate the (m,m) 4x4 block of the full system matrix
-
-      associate( &
-         Pr => pa%Pr,       &
-         R_0 => pa%R_0,     &
-         tau => pa%tau,     &
-         k_z => pa%k_z,     &
-         H_B => pa%H_B,     &
-         D_B => pa%D_B,     &
-         lam_f => pa%lam_f, &
-         l_f => pa%l_f,     &
-         E_psi => pa%E_psi, &
-         E_T => pa%E_T,     &
-         E_C => pa%E_C)
-
-         k2_m = m**2*l_f**2 + k_z**2
-
-         if (m /= 0) then
-
-            B(1,1) = -Pr*k2_m
-            B(1,2) =  Pr*m*l_f/k2_m
-            B(1,3) = -Pr*m*l_f/k2_m
-            B(1,4) = -H_B*k_z
-
-            B(2,1) = -m*l_f
-            B(2,2) = -k2_m
-            B(2,3) = 0
-            B(2,4) = 0
-
-            B(3,1) = -m*l_f/R_0
-            B(3,2) = 0
-            B(3,3) = -tau*k2_m
-            B(3,4) = 0
-
-            B(4,1) = k_z
-            B(4,2) = 0
-            B(4,3) = 0
-            B(4,4) = -D_B*k2_m
-
-         else
-
-            B(1,1) = -Pr*k2_m
-            B(1,2) = 0
-            B(1,3) = 0
-            B(1,4) = -H_B*k_z
-
-            B(2,1) = 0
-            B(2,2) = -k2_m
-            B(2,3) = 0
-            B(2,4) = 0
-
-            B(3,1) = 0
-            B(3,2) = 0
-            B(3,3) = -tau*k2_m
-            B(3,4) = 0
-
-            B(4,1) = k_z
-            B(4,2) = 0
-            B(4,3) = 0
-            B(4,4) = -D_B*k2_m
-
-         end if
-
-      end associate
-
-   end subroutine eval_block_m
-
-   !****
-
-   subroutine eval_block_mm1(N, m, pa, B)
-
-      integer, intent(in)           :: N
-      integer, intent(in)           :: m
-      type(params_t), intent(in)    :: pa
-      real(RD), intent(out)         :: B(:,:)
-
-      real(RD) :: k2_m
-      real(RD) :: k2_diff
-
-      @:CHECK_BOUNDS(SIZE(B, 1),4)
-      @:CHECK_BOUNDS(SIZE(B, 2),4)
-
-      @:ASSERT_DEBUG(m >= -N .AND. m <= N,'invalid m')
-
-      ! Evaluate the (m,m-1) 4x4 block of the full system matrix
-
-      associate( &
-         Pr => pa%Pr,       &
-         R_0 => pa%R_0,       &
-         tau => pa%tau,     &
-         k_z => pa%k_z,     &
-         H_B => pa%H_B,     &
-         D_B => pa%D_B,     &
-         lam_f => pa%lam_f, &
-         l_f => pa%l_f,     &
-         E_psi => pa%E_psi, &
-         E_T => pa%E_T,     &
-         E_C => pa%E_C)
-
-         k2_m = m**2*l_f**2 + k_z**2
-         k2_diff = -m*(m-2)*l_f**2 - k_z**2 ! l**2 - k[m-1]**2
-
-         if (E_psi /= 0._RD) then
-
-            B(1,1) = l_f*k_z*E_psi/k2_m*k2_diff
-            B(1,2) = 0
-            B(1,3) = 0
-            B(1,4) = 0
-
-            B(2,1) = l_f*k_z*E_T
-            B(2,2) = -l_f*k_z*E_psi
-            B(2,3) = 0
-            B(2,4) = 0
-
-            B(3,1) = l_f*k_z*E_C
-            B(3,2) = 0
-            B(3,3) = -l_f*k_z*E_psi
-            B(3,4) = 0
-
-            B(4,1) = 0
-            B(4,2) = 0
-            B(4,3) = 0
-            B(4,4) = -l_f*k_z*E_psi
-
-         else
-
-            B = 0
-
-         end if
-
-      end associate
-
-   end subroutine eval_block_mm1
-
-   !****
-
-   subroutine eval_block_mp1(N, m, pa, B)
-
-      integer, intent(in)           :: N
-      integer, intent(in)           :: m
-      type(params_t), intent(in)    :: pa
-      real(RD), intent(out)         :: B(:,:)
-
-      real(RD) :: k2_m
-      real(RD) :: k2_diff
-      
-      @:CHECK_BOUNDS(SIZE(B, 1),4)
-      @:CHECK_BOUNDS(SIZE(B, 2),4)
-
-      @:ASSERT_DEBUG(m >= -N .AND. m <= N,'invalid m')
-
-      ! Evaluate the (m,m+1) 4x4 block of the full system matrix
-
-      associate( &
-         Pr => pa%Pr,       &
-         R_0 => pa%R_0,       &
-         tau => pa%tau,     &
-         k_z => pa%k_z,     &
-         H_B => pa%H_B,     &
-         D_B => pa%D_B,     &
-         lam_f => pa%lam_f, &
-         l_f => pa%l_f,     &
-         E_psi => pa%E_psi, &
-         E_T => pa%E_T,     &
-         E_C => pa%E_C)
-
-         k2_m = m**2*l_f**2 + k_z**2
-         k2_diff = -m*(m+2)*l_f**2 - k_z**2 ! l**2 - k[m+1]**2
-
-         if (E_psi /= 0._RD) then
-
-            B(1,1) = -l_f*k_z*E_psi/k2_m*k2_diff
-            B(1,2) = 0
-            B(1,3) = 0
-            B(1,4) = 0
-
-            B(2,1) = l_f*k_z*E_T
-            B(2,2) = l_f*k_z*E_psi
-            B(2,3) = 0
-            B(2,4) = 0
-
-            B(3,1) = l_f*k_z*E_C
-            B(3,2) = 0
-            B(3,3) = l_f*k_z*E_psi
-            B(3,4) = 0
-
-            B(4,1) = 0
-            B(4,2) = 0
-            B(4,3) = 0
-            B(4,4) = l_f*k_z*E_psi
-
-         else
-
-            B = 0
-
-         end if
-
-      end associate
-
-   end subroutine eval_block_mp1
-
-   !****
-
-   subroutine eval_matrix(N, pa, A, parity, pre_fac, use_mesa)
-
-      integer, intent(in)            :: N
-      type(params_t), intent(in)     :: pa
-      real(RD), intent(out)          :: A(:,:)
-      logical, intent(in), optional  :: parity
-      real(RD), intent(in), optional :: pre_fac
-      logical, intent(in), optional  :: use_mesa
-
-      logical               :: use_mesa_
-      real(RD), allocatable :: L(:,:)
-
-      if (PRESENT(use_mesa)) then
-         use_mesa_ = use_mesa
-      else
-         use_mesa_ = .FALSE.
+      if (fl%split) then
+         @:ASSERT(PRESENT(parity), 'need to specify parity when split=.TRUE.')
       end if
-     
+
+      ! Given the parameters, get the matrix dimension
+
+      if (fl%use_lpn_qs) then
+
+         if (fl%split) then
+            D = 2*N + 1
+         else
+            D = 4*N + 2
+         end if
+
+      elseif (fl%use_lpn) then
+
+         if (fl%split) then
+
+            if (parity) then
+               D = 3*N + 2
+            else
+               D = 3*N + 1
+            end if
+
+         else
+
+            D = 6*N + 3
+
+         end if
+
+      else
+
+         if (fl%split) then
+
+            D = 4*N + 2
+
+         else
+
+            D = 8*N + 4
+
+         end if
+
+      end if
+
+      ! Finish
+
+      return
+
+   end subroutine get_matrix_dim
+      
+   !****
+
+   subroutine eval_matrix(pa, fl, A, parity)
+
+      type(params_t), intent(in)    :: pa
+      type(flags_t), intent(in)     :: fl
+      real(RD), intent(out)         :: A(:,:)
+      logical, intent(in), optional :: parity
+
+      real(RD), allocatable :: A_(:,:)
+      integer               :: D
+
+      if (fl%split) then
+         @:ASSERT(PRESENT(parity), 'need to specify parity when split=.TRUE.')
+      end if
+
       ! Evaluate the system matrix A
 
-      if (use_mesa_) then
-         if (PRESENT(parity)) then
-            if (parity) then
-               call build_parasite_matrix(pa%w_f, pa%k_z, pa%Pr, pa%tau, pa%R_0, pa%H_B, pa%D_B, pa%lam_f, pa%l_f, N, L, 'EVEN')
+      if (fl%use_mesa) then
+
+         if (fl%use_lpn_qs) then
+
+            if (fl%split) then
+
+               if (parity) then
+                  call build_parasite_matrix_LPN_QS(pa%w_f, pa%k_z, pa%Pr, pa%tau, pa%R_0, pa%H_B, pa%D_B, &
+                     pa%lam_f, pa%l_f, pa%N, A_, 'EVEN')
+               else
+                  call build_parasite_matrix_LPN_QS(pa%w_f, pa%k_z, pa%Pr, pa%tau, pa%R_0, pa%H_B, pa%D_B, &
+                     pa%lam_f, pa%l_f, pa%N, A_, 'ODD')
+               end if
+
             else
-               call build_parasite_matrix(pa%w_f, pa%k_z, pa%Pr, pa%tau, pa%R_0, pa%H_B, pa%D_B, pa%lam_f, pa%l_f, N, L, 'ODD')
+
+               call build_parasite_matrix_LPN_QS(pa%w_f, pa%k_z, pa%Pr, pa%tau, pa%R_0, pa%H_B, pa%D_B, &
+                  pa%lam_f, pa%l_f, pa%N, A_)
+
             end if
+
+         elseif (fl%use_lpn) then
+            
+            if (fl%split) then
+               
+               if (parity) then
+                  call build_parasite_matrix_LPN(pa%w_f, pa%k_z, pa%Pr, pa%tau, pa%R_0, pa%H_B, pa%D_B, &
+                     pa%lam_f, pa%l_f, pa%N, A_, 'EVEN')
+               else
+                  call build_parasite_matrix_LPN(pa%w_f, pa%k_z, pa%Pr, pa%tau, pa%R_0, pa%H_B, pa%D_B, &
+                     pa%lam_f, pa%l_f, pa%N, A_, 'ODD')
+               end if
+
+            else
+
+               call build_parasite_matrix_LPN(pa%w_f, pa%k_z, pa%Pr, pa%tau, pa%R_0, pa%H_B, pa%D_B, &
+                  pa%lam_f, pa%l_f, pa%N, A_)
+
+            end if
+
          else
-            call build_parasite_matrix(pa%w_f, pa%k_z, pa%Pr, pa%tau, pa%R_0, pa%H_B, pa%D_B, pa%lam_f, pa%l_f, N, L)
+            
+            if (fl%split) then
+               
+               if (parity) then
+
+                  call build_parasite_matrix(pa%w_f, pa%k_z, pa%Pr, pa%tau, pa%R_0, pa%H_B, pa%D_B, &
+                     pa%lam_f, pa%l_f, pa%N, A_, 'EVEN')
+
+               else
+
+                  call build_parasite_matrix(pa%w_f, pa%k_z, pa%Pr, pa%tau, pa%R_0, pa%H_B, pa%D_B, &
+                     pa%lam_f, pa%l_f, pa%N, A_, 'ODD')
+
+               end if
+
+            else
+
+               call build_parasite_matrix(pa%w_f, pa%k_z, pa%Pr, pa%tau, pa%R_0, pa%H_B, pa%D_B, &
+                  pa%lam_f, pa%l_f, pa%N, A_)
+
+            end if
+
          end if
-         A = L
+
+         A = A_
+
       else
-         if (PRESENT(parity)) then
-            call eval_matrix_split(N, pa, A, parity, pre_fac)
+         
+         if (fl%use_lpn_qs) then
+
+            call eval_matrix_lpn_qs(pa, fl, A, parity)
+
+         elseif (fl%use_lpn) then
+
+            call eval_matrix_lpn(pa, fl, A, parity)
+
          else
-            call eval_matrix_full(N, pa, A, pre_fac)
+
+            call eval_matrix_full(pa, fl, A, parity)
+
          end if
+
+      end if
+
+      ! If necessary, reverse the order of the matrix
+
+      if (fl%reorder) then
+
+         D = SIZE(A, 1)
+
+         A = A(D:1:-1,D:1:-1)
+
       end if
 
    end subroutine eval_matrix
-
-   !****
-
-   subroutine eval_matrix_full(N, pa, A, pre_fac)
-
-      integer, intent(in)            :: N
-      type(params_t), intent(in)     :: pa
-      real(RD), intent(out)          :: A(:,:)
-      real(RD), intent(in), optional :: pre_fac
-
-      integer :: m
-      integer :: k
-
-      @:CHECK_BOUNDS(SIZE(A, 1),4*(2*N+1))
-      @:CHECK_BOUNDS(SIZE(A, 2),4*(2*N+1))
-
-      ! Evaluate the full system matrix A
-
-      A = 0
-
-      k = 1
-
-      blockloop: do m = -N, N
-
-         call eval_block_m(N, m, pa, A(k:k+3,k:k+3))
-
-         if(m > -N) then
-            call eval_block_mm1(N, m, pa, A(k:k+3,k-4:k-1))
-         endif
-            
-         if(m < N) then
-            call eval_block_mp1(N, m, pa, A(k:k+3,k+4:k+7))
-         end if
-
-         k = k + 4
-
-      end do blockloop
-
-      ! If necessary, apply the preconditioning factor
-
-      if (PRESENT(pre_fac)) A = A*pre_fac
-
-   end subroutine eval_matrix_full
-
-   !****
-
-   subroutine eval_matrix_split(N, pa, A, parity, pre_fac)
-
-      integer, intent(in)            :: N
-      type(params_t), intent(in)     :: pa
-      real(RD), intent(out)          :: A(:,:)
-      logical, intent(in)            :: parity
-      real(RD), intent(in), optional :: pre_fac
-
-      integer  :: m
-      integer  :: k
-      real(RD) :: B(4,4)
-
-      @:CHECK_BOUNDS(SIZE(A, 1),2*(2*N+1))
-      @:CHECK_BOUNDS(SIZE(A, 2),2*(2*N+1))
-
-      ! Evaluate the split-parity system matrix A(+/-)
-
-      A = 0
-
-      k = 1
-
-      block_loop: do m = 0, N
-
-         call eval_block_m(N, m, pa, B) 
-
-         if (m == 0) then
-            if (parity) then
-               A(k:k+1,k:k+1) = B([1,4],[1,4])
-            else
-               A(k:k+1,k:k+1) = B([2,3],[2,3])
-            end if
-         else
-            A(k:k+3,k:k+3) = B
-         end if
-
-         if (m > 0) then
-
-            call eval_block_mm1(N, m, pa, B)
-
-            if (m == 1) then
-               if (parity) then
-                  A(k:k+3,k-2:k-1) = B(:,[1,4])
-               else
-                  A(k:k+3,k-2:k-1) = B(:,[2,3])
-               end if
-            else
-               A(k:k+3,k-4:k-1) = B
-            end if
-
-         end if
-
-         if (m < N) then
-
-            call eval_block_mp1(N, m, pa, B)
-
-            if (m == 0) then
-               if (parity) then
-                  A(k:k+1,k+2:k+5) = 2*B([1,4],:)
-               else
-                  A(k:k+1,k+2:k+5) = 2*B([2,3],:)
-               end if
-            else
-               A(k:k+3,k+4:k+7) = B
-            end if
-         end if
-
-         if (m == 0) then
-            k = k + 2
-         else
-            k = k + 4
-         end if
-
-      end do block_loop
-
-      ! If necessary, apply the preconditioning factor
-
-      if (PRESENT(pre_fac)) A = A*pre_fac
-
-   end subroutine eval_matrix_split
-
-   ! !****
-
-   ! subroutine eval_prod(N, pa, x, y)
-
-   !    integer, intent(in)        :: N
-   !    type(params_t), intent(in) :: pa
-   !    real(RD), intent(in)       :: x(:)
-   !    real(RD), intent(out)      :: y(:)
-
-   !    integer  :: i
-   !    integer  :: m
-   !    real(RD) :: B(4,4)
-
-   !    @:CHECK_BOUNDS(SIZE(x), 4*(2*N+1))
-   !    @:CHECK_BOUNDS(SIZE(y), 4*(2*N+1))
-
-   !    ! Evaluate the system matrix operating as y <- A*x
-
-   !    i = 1
-
-   !    do m = -N, N
-
-   !       call eval_D(N, m, pa, B)
-   !       y(i:i+3) = MATMUL(B, x(i:i+3))
-
-   !       if(m > -N) then
-   !          call eval_L(N, m, pa, B)
-   !          y(i:i+3) = y(i:i+3) +  MATMUL(B, x(i-4:i-1))
-   !       end if
-
-   !       if(m < N) then
-   !          call eval_U(N, m, pa, B)
-   !          y(i:i+3) = y(i:i+3) + MATMUL(B, x(i+4:i+7))
-   !       end if
-
-   !       i = i + 4
-
-   !    end do
-
-   ! end subroutine eval_prod
 
 end module matrix_m

@@ -26,17 +26,16 @@ module pert_expand_m
 
 contains
 
-   subroutine eval_A00_matrix(N, pa, A)
+   subroutine eval_A00_matrix(pa, A)
 
-      integer, intent(in)        :: N
       type(params_t), intent(in) :: pa
       real(RD), intent(out)      :: A(:,:)
 
       integer :: i
       integer :: m
 
-      @:CHECK_BOUNDS(SIZE(A, 1),4*(2*N+1))
-      @:CHECK_BOUNDS(SIZE(A, 2),4*(2*N+1))
+      @:CHECK_BOUNDS(SIZE(A, 1), 4*(2*pa%N+1))
+      @:CHECK_BOUNDS(SIZE(A, 2), 4*(2*pa%N+1))
 
       ! Evaluate the matrix
 
@@ -49,7 +48,8 @@ contains
          tau => pa%tau, &
          R_0 => pa%R_0, &
          D_B => pa%D_B, &
-         l_f => pa%l_f)
+         l_f => pa%l_f, &
+         N => pa%N)
 
          block_loop: do m = -N, N
 
@@ -95,9 +95,8 @@ contains
 
    !****
 
-   subroutine eval_A01_matrix(N, pa, A)
+   subroutine eval_A01_matrix(pa, A)
 
-      integer, intent(in)        :: N
       type(params_t), intent(in) :: pa
       real(RD), intent(out)      :: A(:,:)
 
@@ -107,8 +106,8 @@ contains
       real(RD) :: F_T
       real(RD) :: F_C
 
-      @:CHECK_BOUNDS(SIZE(A, 1),4*(2*N+1))
-      @:CHECK_BOUNDS(SIZE(A, 2),4*(2*N+1))
+      @:CHECK_BOUNDS(SIZE(A, 1), 4*(2*pa%N+1))
+      @:CHECK_BOUNDS(SIZE(A, 2), 4*(2*pa%N+1))
 
       ! Evaluate the matrix
 
@@ -120,7 +119,8 @@ contains
          tau => pa%tau, &
          R_0 => pa%R_0, &
          l_f => pa%l_f, &
-         lam_f => pa%lam_f)
+         lam_f => pa%lam_f, &
+         N => pa%N)
 
          F_psi = 1/(2*l_f)
          F_T = -l_f*F_psi/(lam_f + l_f**2)
@@ -220,17 +220,16 @@ contains
    
    !****
 
-   subroutine eval_A10_matrix(N, pa, A)
+   subroutine eval_A10_matrix(pa, A)
 
-      integer, intent(in)        :: N
       type(params_t), intent(in) :: pa
       real(RD), intent(out)      :: A(:,:)
 
       integer :: i
       integer :: m
 
-      @:CHECK_BOUNDS(SIZE(A, 1),4*(2*N+1))
-      @:CHECK_BOUNDS(SIZE(A, 2),4*(2*N+1))
+      @:CHECK_BOUNDS(SIZE(A, 1), 4*(2*pa%N+1))
+      @:CHECK_BOUNDS(SIZE(A, 2), 4*(2*pa%N+1))
 
       ! Evaluate the matrix
 
@@ -239,7 +238,8 @@ contains
       A = 0._RD
 
       associate( &
-         H_B => pa%H_B)
+         H_B => pa%H_B, &
+         N => pa%N)
          
          block_loop: do m = -N, N
 
@@ -281,15 +281,13 @@ contains
    
    !****
 
-   subroutine eval_A11_matrix(N, pa, A)
+   subroutine eval_A11_matrix(pa, A)
 
-      integer, intent(in)        :: N
       type(params_t), intent(in) :: pa
       real(RD), intent(out)      :: A(:,:)
 
-
-      @:CHECK_BOUNDS(SIZE(A, 1),4*(2*N+1))
-      @:CHECK_BOUNDS(SIZE(A, 2),4*(2*N+1))
+      @:CHECK_BOUNDS(SIZE(A, 1), 4*(2*pa%N+1))
+      @:CHECK_BOUNDS(SIZE(A, 2), 4*(2*pa%N+1))
 
       ! Evaluate the matrix
 
@@ -303,14 +301,13 @@ contains
 
    !****
 
-   subroutine eval_A02_matrix(N, pa, A)
+   subroutine eval_A02_matrix(pa, A)
 
-      integer, intent(in)        :: N
       type(params_t), intent(in) :: pa
       real(RD), intent(out)      :: A(:,:)
 
-      @:CHECK_BOUNDS(SIZE(A, 1),4*(2*N+1))
-      @:CHECK_BOUNDS(SIZE(A, 2),4*(2*N+1))
+      @:CHECK_BOUNDS(SIZE(A, 1), 4*(2*pa%N+1))
+      @:CHECK_BOUNDS(SIZE(A, 2), 4*(2*pa%N+1))
 
       ! Evaluate the matrix
 
@@ -324,17 +321,16 @@ contains
 
    !****
 
-   subroutine eval_A20_matrix(N, pa, A)
+   subroutine eval_A20_matrix(pa, A)
 
-      integer, intent(in)        :: N
       type(params_t), intent(in) :: pa
       real(RD), intent(out)      :: A(:,:)
 
       integer :: i
       integer :: m
 
-      @:CHECK_BOUNDS(SIZE(A, 1),4*(2*N+1))
-      @:CHECK_BOUNDS(SIZE(A, 2),4*(2*N+1))
+      @:CHECK_BOUNDS(SIZE(A, 1), 4*(2*pa%N+1))
+      @:CHECK_BOUNDS(SIZE(A, 2), 4*(2*pa%N+1))
 
       ! Evaluate the matrix
 
@@ -346,7 +342,8 @@ contains
          Pr => pa%Pr, &
          tau => pa%tau, &
          D_B => pa%D_B, &
-         l_f => pa%l_f)
+         l_f => pa%l_f, &
+         N => pa%N)
 
          block_loop: do m = -N, N
 

@@ -5,8 +5,10 @@ program thermo_scan_1d
    ! Uses
 
    use forum_m, split_ => split
+   use flags_m
    use params_m
    use finger_m
+   use matrix_m
    use thermo_m
 
    use ISO_FORTRAN_ENV
@@ -41,8 +43,10 @@ program thermo_scan_1d
    logical                  :: invert
    logical                  :: reorder
    logical                  :: use_mesa
-   logical                  :: partition
+   logical                  :: use_lpn
+   logical                  :: use_lpn_qs
    character(256)           :: out_file
+   type(flags_t)            :: fl
    real(RD)                 :: lam_f
    real(RD)                 :: l_f
    real(RD)                 :: k_z_min
@@ -50,17 +54,19 @@ program thermo_scan_1d
    real(RD)                 :: w_f_min
    real(RD)                 :: w_f_max
    real(RD), allocatable    :: scan_var(:)
+   complex(RD), allocatable :: sig(:,:)
+   integer                  :: D_e
+   integer                  :: D_o
+   integer                  :: D
    type(params_t)           :: pa
    integer                  :: i
-   complex(RD), allocatable :: sig(:,:)
-   complex(RD), allocatable :: sig_2nd(:,:)
    type(hdf5io_t)           :: hi
 
    namelist /params/ &
       scan_var_name, scan_var_min, scan_var_max, n_scan_var, log_scan_var, &
       rescale_k_z_min, rescale_k_z_max, rescale_k_z, &
       R_0, Pr, tau, H_B, D_B, w_f, k_z, &
-      N, split, shift, invert, reorder, use_mesa, partition, &
+      N, split, shift, invert, reorder, use_mesa, use_lpn, use_lpn_qs, &
       out_file
 
    ! Read arguments
@@ -94,7 +100,8 @@ program thermo_scan_1d
    invert = .FALSE.
    reorder = .FALSE.
    use_mesa = .FALSE.
-   partition = .FALSE.
+   use_lpn = .FALSE.
+   use_lpn_qs = .FALSE.
 
    open(NEWUNIT=unit, STATUS='OLD', FILE=nml_file)
    read(unit, NML=params)
@@ -107,6 +114,15 @@ program thermo_scan_1d
    print *,'D_B   :', D_B
    print *,'w_f   :', w_f
    print *,'k_z   :', k_z
+
+   fl = flags_t(&
+      split=split, &
+      shift=shift, &
+      invert=invert, &
+      reorder=reorder, &
+      use_mesa=use_mesa, &
+      use_lpn=use_lpn, &
+      use_lpn_qs=use_lpn_qs)
 
    ! Solve for fingering-instability parameters
 
@@ -139,12 +155,21 @@ program thermo_scan_1d
 
    end select
 
-   ! Loop over the scan variable
+   ! Allocate arrays
 
    allocate(scan_var(n_scan_var))
 
-   allocate(sig(4*(2*N+1), n_scan_var))
-   allocate(sig_2nd(4*(2*N+1), n_scan_var))
+   if (fl%split) then
+      call get_matrix_dim(N, fl, D_e, parity=.TRUE.)
+      call get_matrix_dim(N, fl, D_o, parity=.FALSE.)
+      D = D_e + D_o
+   else
+      call get_matrix_dim(N, fl, D)
+   end if
+
+   allocate(sig(D, n_scan_var))
+
+   ! Loop over the scan variable
 
    !$OMP PARALLEL DO PRIVATE(pa)
    do i = 1, n_scan_var
@@ -160,7 +185,7 @@ program thermo_scan_1d
             scan_var(i) = (k_z_min*(n_scan_var-i) + k_z_max*(i-1))/(n_scan_var - 1)
          endif
 
-         pa = params_t(R_0, Pr, tau, H_B, D_B, w_f, scan_var(i))
+         pa = params_t(R_0, Pr, tau, H_B, D_B, w_f, scan_var(i), N)
 
       case('w_f')
       
@@ -170,14 +195,13 @@ program thermo_scan_1d
             scan_var(i) = (w_f_min*(n_scan_var-i) + w_f_max*(i-1))/(n_scan_var - 1)
          endif
 
-         pa = params_t(R_0, Pr, tau, H_B, D_B, scan_var(i), k_z)
+         pa = params_t(R_0, Pr, tau, H_B, D_B, scan_var(i), k_z, N)
 
       end select
 
       ! Evaluate the full set of eigenvalues
 
-      call eigen_all(N, pa, split, shift, invert, reorder, sig(:,i))
-      call eigen_2nd_order(N, pa, sig_2nd(:,i), partition)
+      call eigen_all(pa, fl, sig(:,i))
 
    end do
 
@@ -201,7 +225,6 @@ program thermo_scan_1d
 
    call hi%write_dset(scan_var_name, scan_var)
    call hi%write_dset('sig', sig)
-   call hi%write_dset('sig_2nd', sig_2nd)
 
    call hi%final()
 

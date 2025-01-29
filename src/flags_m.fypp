@@ -1,0 +1,33 @@
+#:include 'forum.inc'
+
+module flags_m
+
+   ! Uses
+
+   use forum_m
+
+   use ISO_FORTRAN_ENV
+
+   ! No implicit typing
+
+   implicit none
+
+   ! Derived-type definitions
+
+   type flags_t
+      logical :: split = .FALSE.     ! Split into even/odd parity submatrices
+      logical :: shift = .FALSE.     ! Apply eigenvalue shift to matrix
+      logical :: invert = .FALSE.    ! Solve inverse problem
+      logical :: reorder = .FALSE.   ! Reorder matrix
+      logical :: use_mesa = .FALSE.  ! Use MESA routines to evaluate matrices
+      logical :: use_lpn = .FALSE.   ! Use low-Peclnet-number (LPN) limit   
+      logical :: use_lpn_qs= .FALSE. ! Use LPN and quasi-static (QS) limits
+   end type flags_t
+
+   ! Access specifiers
+
+   private
+
+   public :: flags_t
+
+end module flags_m

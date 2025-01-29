@@ -5,6 +5,7 @@ program pert_expand
    ! Uses
 
    use forum_m, split_ => split
+   use flags_m
    use params_m
    use finger_m
    use linalg_m
@@ -32,10 +33,11 @@ program pert_expand
    integer                  :: N
    character(256)           :: out_file
 
+   type(flags_t)            :: fl
    real(RD)                 :: lam_f
    real(RD)                 :: l_f
    type(params_t)           :: pa
-   integer                  :: d
+   integer                  :: D
    real(RD), allocatable    :: A00(:,:)
    real(RD), allocatable    :: A01(:,:)
    real(RD), allocatable    :: A10(:,:)
@@ -97,6 +99,8 @@ program pert_expand
    print *,'D_B   :', D_B
    print *,'N     :', N
 
+   fl = flags_t()
+
    ! Solve for fingering-instability parameters
 
    call solve_finger(R_0, Pr, tau, lam_f, l_f)
@@ -106,35 +110,35 @@ program pert_expand
 
    ! Build the A matrices
 
-   pa = params_t(R_0, Pr, tau, H_B, D_B, 0._RD, 0._RD)
+   pa = params_t(R_0, Pr, tau, H_B, D_B, 0._RD, 0._RD, N)
 
    pa%lam_f = lam_f
    pa%l_f = l_f
 
-   d = 4*(2*N+1)
+   call get_matrix_dim(N, fl, D)
 
-   allocate(A00(d,d))
-   allocate(A01(d,d))
-   allocate(A10(d,d))
-   allocate(A11(d,d))
-   allocate(A02(d,d))
-   allocate(A20(d,d))
+   allocate(A00(D,D))
+   allocate(A01(D,D))
+   allocate(A10(D,D))
+   allocate(A11(D,D))
+   allocate(A02(D,D))
+   allocate(A20(D,D))
 
-   call eval_A00_matrix(N, pa, A00)
-   call eval_A01_matrix(N, pa, A01)
-   call eval_A10_matrix(N, pa, A10)
-   call eval_A11_matrix(N, pa, A11)
-   call eval_A02_matrix(N, pa, A02)
-   call eval_A20_matrix(N, pa, A20)
+   call eval_A00_matrix(pa, A00)
+   call eval_A01_matrix(pa, A01)
+   call eval_A10_matrix(pa, A10)
+   call eval_A11_matrix(pa, A11)
+   call eval_A02_matrix(pa, A02)
+   call eval_A20_matrix(pa, A20)
 
-   call check_pert(pa, A00, A01, A10, A11, A02, A20)
+   call check_pert(pa, fl, A00, A01, A10, A11, A02, A20)
 
    ! Diagonalize A00
 
-   allocate(sig00(d))
+   allocate(sig00(D))
 
-   allocate(XL(d,d))
-   allocate(XR(d,d))
+   allocate(XL(D,D))
+   allocate(XR(D,D))
 
    XL = 0
    XR = 0
@@ -170,13 +174,13 @@ program pert_expand
 
    ! Evaluate the sigma terms
 
-   allocate(sig01(d))
-   allocate(sig10(d))
-   allocate(sig11(d))
-   allocate(sig02(d))
-   allocate(sig20(d))
+   allocate(sig01(D))
+   allocate(sig10(D))
+   allocate(sig11(D))
+   allocate(sig02(D))
+   allocate(sig20(D))
 
-   do i = 1, d
+   do i = 1, D
 
       sig01(i) = V01(i,i)
 
@@ -186,7 +190,7 @@ program pert_expand
       sig02(i) = V02(i,i)
       sig20(i) = V20(i,i)
 
-      do j = 1, d
+      do j = 1, D
 
          if (j /= i) then
 
@@ -250,9 +254,10 @@ program pert_expand
 
 contains
 
-   subroutine check_pert(pa, A00, A01, A10, A11, A02, A20)
+   subroutine check_pert(pa, fl, A00, A01, A10, A11, A02, A20)
 
       type(params_t), intent(in) :: pa
+      type(flags_t), intent(in)  :: fl
       real(RD), intent(in)       :: A00(:,:)
       real(RD), intent(in)       :: A01(:,:)
       real(RD), intent(in)       :: A10(:,:)
@@ -269,8 +274,8 @@ contains
       integer        :: i
       integer        :: m
 
-      integer :: j,k
-      logical :: flag
+      integer  :: j,k
+      logical  :: flag
       real(RD) :: err
 
       ! Set params
@@ -281,11 +286,11 @@ contains
 
       print *,q_f/2
 
-      pa_ = params_t(pa%R_0, pa%Pr, pa%tau, pa%H_B, pa%D_B, w_f, k_z)
+      pa_ = params_t(pa%R_0, pa%Pr, pa%tau, pa%H_B, pa%D_B, w_f, k_z, pa%N)
 
       ! Build the full matrices
 
-      call eval_matrix(N, pa_, A_full)
+      call eval_matrix(pa_, fl, A_full)
 
       ! Compare against the expanded matrices
 
@@ -293,9 +298,9 @@ contains
 
       i = 1
 
-      block_loop: do m = -N, N
+      block_loop: do m = -pa%N, pa%N
 
-         if (m > -N) then
+         if (m > -pa%N) then
 
             print *, 'm=',m,'(left)'
 
@@ -333,7 +338,7 @@ contains
 
          print *, 'm=',m,'(right)'
 
-         if (m < N) then
+         if (m < pa%N) then
 
             associate(B => A(i:i+3,i+4:i+7), B_full => A_full(i:i+3,i+4:i+7))
 

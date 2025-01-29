@@ -5,6 +5,7 @@ program thermo_gersh
    ! Uses
 
    use forum_m, split_ => split
+   use flags_m
    use params_m
    use finger_m
    use matrix_m
@@ -35,9 +36,13 @@ program thermo_gersh
    real(RD)                 :: D_B
    integer                  :: N
    logical                  :: use_mesa
-   character(256)           :: out_file
+   character(256)           :: out_file 
+   type(flags_t)            :: fl
    real(RD)                 :: lam_f
    real(RD)                 :: l_f
+   integer                  :: D_even
+   integer                  :: D_odd
+   integer                  :: D
    real(RD), allocatable    :: k_z(:)
    complex(RD), allocatable :: sig(:,:)
    real(RD), allocatable    :: C_off(:,:)
@@ -87,6 +92,10 @@ program thermo_gersh
    print *,'D_B   :', D_B
    print *,'k_z   :', k_z
 
+   fl = flags_t(&
+      use_mesa=use_mesa, &
+      split=.TRUE.)
+ 
    ! Solve for fingering-instability parameters
 
    call solve_finger(R_0, Pr, tau, lam_f, l_f)
@@ -99,13 +108,20 @@ program thermo_gersh
    if (rescale_k_z_min) k_z_min = k_z_min*l_f
    if (rescale_k_z_max) k_z_max = k_z_max*l_f
 
-   ! Loop over k_z
+   ! Allocate arrays
+
+   call get_matrix_dim(N, fl, D_even, parity=.TRUE.)
+   call get_matrix_dim(N, fl, D_odd, parity=.FALSE.)
+
+   D = D_even + D_odd
 
    allocate(k_z(n_k_z))
 
-   allocate(sig(4*(2*N+1), n_k_z))
-   allocate(C_off(4*(2*N+1), n_k_z))
- 
+   allocate(sig(D, n_k_z))
+   allocate(C_off(D, n_k_z))
+
+   ! Loop over k_z
+
    !$OMP PARALLEL DO PRIVATE(pa)
    do i = 1, n_k_z
 
@@ -117,12 +133,12 @@ program thermo_gersh
          k_z(i) = (k_z_min*(n_k_z-i) + k_z_max*(i-1))/(n_k_z - 1)
       endif
 
-      pa = params_t(R_0, Pr, tau, H_B, D_B, 1._RD, k_z(i))
+      pa = params_t(R_0, Pr, tau, H_B, D_B, 1._RD, k_z(i), N)
 
       ! Calculate sig and C_off
 
-      call eval_sig_C_off(N, pa, .TRUE., use_mesa, sig(1::2,i), C_off(1::2,i))
-      call eval_sig_C_off(N, pa, .FALSE., use_mesa, sig(2::2,i), C_off(2::2,i))
+      call eval_sig_C_off(pa, fl, .TRUE., sig(1::2,i), C_off(1::2,i))
+      call eval_sig_C_off(pa, fl, .FALSE., sig(2::2,i), C_off(2::2,i))
 
    end do
 
@@ -149,29 +165,31 @@ program thermo_gersh
 
 contains
 
-   subroutine eval_sig_C_off(N, pa, parity, use_mesa, sig, C_off)
+   subroutine eval_sig_C_off(pa, fl, parity, sig, C_off)
 
-      integer, intent(in)        :: N
       type(params_t), intent(in) :: pa
+      type(flags_t), intent(in)  :: fl
       logical, intent(in)        :: parity
-      logical, intent(in)        :: use_mesa
       complex(RD), intent(out)   :: sig(:)
       real(RD), intent(out)      :: C_off(:)
 
-      integer  :: i
-      integer  :: m
-      real(RD) :: A(2*(2*N+1),2*(2*N+1))
-      real(RD) :: A_0(2*(2*N+1),2*(2*N+1))
-      real(RD) :: A_1(2*(2*N+1),2*(2*N+1))
-      real(RD) :: sig_re(4)
-      real(RD) :: sig_im(4)
+      integer               :: i
+      integer               :: m
+      real(RD), allocatable :: A(:,:)
+      real(RD)              :: A_0(2*(2*N+1),2*(2*N+1))
+      real(RD)              :: A_1(2*(2*N+1),2*(2*N+1))
+      real(RD)              :: sig_re(4)
+      real(RD)              :: sig_im(4)
       
       @:CHECK_BOUNDS(SIZE(sig), 2*(2*N+1))
       @:CHECK_BOUNDS(SIZE(C_off), 2*(2*N+1))
    
       ! Evaluate the zeroth- and first-order parts of the matrix
 
-      call eval_matrix(N, pa, A, parity=parity, use_mesa=use_mesa)
+      call eval_matrix(pa, fl, A, parity)
+
+      @:CHECK_BOUNDS(SIZE(A, 1), 2*(2*N+1))
+      @:CHECK_BOUNDS(SIZE(A, 2), 2*(2*N+1))
 
       A_0 = 0._RD
 

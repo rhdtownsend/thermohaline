@@ -28,6 +28,7 @@ module params_m
       real(RD) :: E_psi ! F23, after eqn. (36)
       real(RD) :: E_T   ! F23, eqn. (43)
       real(RD) :: E_C   ! F23, eqn. (42)
+      integer  :: N     ! Maximal horizontal wavenumber
    end type params_t
 
    ! Interfaces
@@ -44,7 +45,7 @@ module params_m
 
 contains
 
-   function params_t_(R_0, Pr, tau, H_B, D_B, w_f, k_z) result(pa)
+   function params_t_(R_0, Pr, tau, H_B, D_B, w_f, k_z, N) result(pa)
 
       real(RD), intent(in) :: R_0
       real(RD), intent(in) :: Pr
@@ -53,6 +54,7 @@ contains
       real(RD), intent(in) :: D_B
       real(RD), intent(in) :: w_f
       real(RD), intent(in) :: k_z
+      integer, intent(in)  :: N
       type(params_t)       :: pa
 
       ! Store parameters
@@ -66,6 +68,8 @@ contains
 
       pa%w_f = w_f
       pa%k_z = k_z
+
+      pa%N = N
 
       ! Solve for the fingering-mode properties and associated
       ! quantities

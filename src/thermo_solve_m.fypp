@@ -5,6 +5,7 @@ module thermo_solve_m
    ! Uses
 
    use forum_m, split_ => split
+   use flags_m
    use params_m
    use thermo_m
    use root_m
@@ -19,14 +20,11 @@ module thermo_solve_m
 
 contains
 
-   subroutine solve_w_f(N, pa, rhs, split, reorder, use_mesa, w_f, sig_max)
+   subroutine solve_w_f(pa, fl, rhs, w_f, sig_max)
 
-      integer, intent(in)        :: N
       type(params_t), intent(in) :: pa
+      type(flags_t), intent(in)  :: fl
       real(RD), intent(in)       :: rhs
-      logical, intent(in)        :: split
-      logical, intent(in)        :: reorder
-      logical, intent(in)        :: use_mesa
       real(RD), intent(out)      :: w_f
       real(RD), intent(out)      :: sig_max
 
@@ -69,18 +67,15 @@ contains
          real(RD), intent(in) :: x
          real(RD)             :: func
 
-         complex(RD)    :: sig(4*(2*N+1))
          type(params_t) :: pa_
 
          ! Evaluate the eigenvalues
 
          associate (w_f => x)
 
-            pa_ = params_t(pa%R_0, pa%Pr, pa%tau, pa%H_B, pa%D_B, w_f, pa%k_z)
+            pa_ = params_t(pa%R_0, pa%Pr, pa%tau, pa%H_B, pa%D_B, w_f, pa%k_z, pa%N)
 
-            call eigen_all(N, pa_, split, .FALSE., .FALSE., reorder, sig, use_mesa=use_mesa)
-
-            sig_max = MAXVAL(REAL(sig, RD))
+            call eigen_max(pa_, fl, sig_max)
 
             func = sig_max - rhs
 

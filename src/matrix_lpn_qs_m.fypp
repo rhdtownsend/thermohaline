@@ -1,0 +1,291 @@
+#:include 'forum.inc'
+
+module matrix_lpn_qs_m
+
+   ! Uses
+
+   use forum_m
+   use flags_m
+   use params_m
+
+   use ISO_FORTRAN_ENV
+
+   ! No implicit typing
+
+   implicit none
+
+   ! Access specifiers
+
+   private
+
+   public :: eval_matrix_lpn_qs
+
+contains
+
+   subroutine eval_matrix_lpn_qs(pa, fl, A, parity)
+
+      type(params_t), intent(in)    :: pa
+      type(flags_t), intent(in)     :: fl
+      real(RD), intent(out)         :: A(:,:)
+      logical, intent(in), optional :: parity
+
+      integer  :: D
+      integer  :: k
+      integer  :: m
+      real(RD) :: B(2,2)
+
+      ! Evaluate the low-Peclet-number, quasi-static (LPN-QS) system matrix A
+
+      if (PRESENT(parity)) then
+
+         D = 2*pa%N + 1
+ 
+         @:CHECK_BOUNDS(SIZE(A, 1), D)
+         @:CHECK_BOUNDS(SIZE(A, 2), D)
+
+         A = 0
+
+         k = 1
+
+         partity_block_loop: do m = 0, pa%N
+
+            call eval_block_diag_(pa, m, B) 
+
+            if (m == 0) then
+               if (parity) then
+                  A(k:k,k:k) = B([1],[1])
+               else
+                  A(k:k,k:k) = B([2],[2])
+               end if
+            else
+               A(k:k+1,k:k+1) = B
+            end if
+         
+            if (m > 0) then
+
+               call eval_block_left_(pa, m, B)
+
+               if (m == 1) then
+                  if (parity) then
+                     A(k:k+1,k-1:k-1) = B(:,[1])
+                  else
+                     A(k:k+1,k-1:k-1) = B(:,[2])
+                  end if
+               else
+                  A(k:k+1,k-2:k-1) = B
+               end if
+
+            end if
+
+            if (m < pa%N) then
+
+               call eval_block_right_(pa, m, B)
+
+               if (m == 0) then
+                  if (parity) then
+                     A(k:k,k+1:k+2) = 2*B([1],:)
+                  else
+                     A(k:k,k+1:k+2) = 2*B([2],:)
+                  end if
+               else
+                  A(k:k+1,k+2:k+3) = B
+               end if
+            end if
+
+            if (m == 0) then
+               k = k + 1
+            else
+               k = k + 2
+            end if
+
+         end do partity_block_loop
+
+      else
+
+         D = 4*pa%N + 2
+
+         @:CHECK_BOUNDS(SIZE(A, 1), D)
+         @:CHECK_BOUNDS(SIZE(A, 2), D)
+
+         A = 0
+
+         k = 1
+
+         block_loop: do m = -pa%N, pa%N
+
+            call eval_block_diag_(pa, m, A(k:k+1,k:k+1))
+
+            if(m > -pa%N) then
+               call eval_block_left_(pa, m, A(k:k+1,k-2:k-1))
+            endif
+            
+            if(m < pa%N) then
+               call eval_block_right_(pa, m, A(k:k+1,k+2:k+3))
+            end if
+
+            k = k + 2
+
+         end do block_loop
+
+      end if
+
+      ! Finish
+
+      return
+
+   end subroutine eval_matrix_lpn_qs
+
+   !****
+
+   subroutine eval_block_diag_(pa, m, B)
+
+      type(params_t), intent(in) :: pa
+      integer, intent(in)        :: m
+      real(RD), intent(out)      :: B(:,:)
+
+      real(RD) :: k2_m
+
+      @:CHECK_BOUNDS(SIZE(B, 1), 2)
+      @:CHECK_BOUNDS(SIZE(B, 2), 2)
+
+      ! Evaluate the diagonal (m,m) 2x2 block of the LPN-QS system matrix
+
+      associate( &
+         Pr => pa%Pr,       &
+         R_0 => pa%R_0,     &
+         tau => pa%tau,     &
+         k_z => pa%k_z,     &
+         H_B => pa%H_B,     &
+         D_B => pa%D_B,     &
+         lam_f => pa%lam_f, &
+         l_f => pa%l_f,     &
+         E_psi => pa%E_psi, &
+         E_T => pa%E_T,     &
+         E_C => pa%E_C)
+
+         k2_m = m**2*l_f**2 + k_z**2
+
+         if (m /= 0) then
+
+            B(1,1) = -Pr*(k2_m + m**2*l_f**2/k2_m**2) - H_B*k_z**2/(D_B*k2_m)
+            B(1,2) = -Pr*m*l_f/k2_m
+
+            B(2,1) = -m*l_f/R_0
+            B(2,2) = -tau*k2_m
+            
+         else
+
+            B(1,1) = -Pr*k2_m - H_B/D_B
+            B(1,2) = 0
+
+            B(2,1) = 0
+            B(2,2) = -tau*k2_m
+
+         end if
+
+      end associate
+
+   end subroutine eval_block_diag_
+
+   !****
+
+   subroutine eval_block_left_(pa, m, B)
+
+      type(params_t), intent(in) :: pa
+      integer, intent(in)        :: m
+      real(RD), intent(out)      :: B(:,:)
+
+      real(RD) :: k2_m
+      real(RD) :: k2_diff
+
+      @:CHECK_BOUNDS(SIZE(B, 1), 2)
+      @:CHECK_BOUNDS(SIZE(B, 2), 2)
+
+      ! Evaluate the left (m,m-1) 2x2 block of the LPN-QS system matrix
+
+      associate( &
+         Pr => pa%Pr,       &
+         R_0 => pa%R_0,       &
+         tau => pa%tau,     &
+         k_z => pa%k_z,     &
+         H_B => pa%H_B,     &
+         D_B => pa%D_B,     &
+         lam_f => pa%lam_f, &
+         l_f => pa%l_f,     &
+         E_psi => pa%E_psi, &
+         E_T => pa%E_T,     &
+         E_C => pa%E_C)
+
+         k2_m = m**2*l_f**2 + k_z**2
+         k2_diff = -m*(m-2)*l_f**2 - k_z**2 ! l**2 - k[m-1]**2
+
+         if (E_psi /= 0._RD) then
+
+            B(1,1) = l_f*k_z*E_psi/k2_m*k2_diff
+            B(1,2) = 0
+
+            B(2,1) = l_f*k_z*E_C
+            B(2,2) = -l_f*k_z*E_psi
+
+         else
+
+            B = 0
+
+         end if
+
+      end associate
+
+   end subroutine eval_block_left_
+
+   !****
+
+   subroutine eval_block_right_(pa, m, B)
+
+      type(params_t), intent(in) :: pa
+      integer, intent(in)        :: m
+      real(RD), intent(out)      :: B(:,:)
+
+      real(RD) :: k2_m
+      real(RD) :: k2_diff
+      
+      @:CHECK_BOUNDS(SIZE(B, 1), 2)
+      @:CHECK_BOUNDS(SIZE(B, 2), 2)
+
+      ! Evaluate the right (m,m+1) 2x2 block of the LPN-QS system matrix
+
+      associate( &
+         Pr => pa%Pr,       &
+         R_0 => pa%R_0,       &
+         tau => pa%tau,     &
+         k_z => pa%k_z,     &
+         H_B => pa%H_B,     &
+         D_B => pa%D_B,     &
+         lam_f => pa%lam_f, &
+         l_f => pa%l_f,     &
+         E_psi => pa%E_psi, &
+         E_T => pa%E_T,     &
+         E_C => pa%E_C)
+
+         k2_m = m**2*l_f**2 + k_z**2
+         k2_diff = -m*(m+2)*l_f**2 - k_z**2 ! l**2 - k[m+1]**2
+
+         if (E_psi /= 0._RD) then
+
+            B(1,1) = -l_f*k_z*E_psi/k2_m*k2_diff
+            B(1,2) = 0
+
+            B(2,1) = l_f*k_z*E_C
+            B(2,2) = l_f*k_z*E_psi
+
+         else
+
+            B = 0
+
+         end if
+
+      end associate
+
+   end subroutine eval_block_right_
+
+end module matrix_lpn_qs_m
+   

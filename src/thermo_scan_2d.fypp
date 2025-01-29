@@ -5,6 +5,7 @@ program thermo_scan_2d
    ! Uses
 
    use forum_m, split_ => split
+   use flags_m
    use params_m
    use finger_m
    use thermo_m
@@ -41,7 +42,10 @@ program thermo_scan_2d
    logical               :: invert
    logical               :: reorder
    logical               :: use_mesa
+   logical               :: use_lpn
+   logical               :: use_lpn_qs
    character(256)        :: out_file
+   type(flags_t)         :: fl
    real(RD)              :: lam_f
    real(RD)              :: l_f
    real(RD), allocatable :: k_z(:)
@@ -56,7 +60,7 @@ program thermo_scan_2d
       k_z_min, k_z_max, n_k_z, log_k_z, rescale_k_z_min, rescale_k_z_max, &
       w_f_min, w_f_max, n_w_f, log_w_f, &
       R_0, Pr, tau, H_B, D_B, &
-      N, split, shift, invert, reorder, use_mesa, &
+      N, split, shift, invert, reorder, use_mesa, use_lpn, use_lpn_qs, &
       out_file
 
    ! Read arguments
@@ -92,6 +96,8 @@ program thermo_scan_2d
    invert = .FALSE.
    reorder = .FALSE.
    use_mesa = .FALSE.
+   use_lpn = .FALSE.
+   use_lpn_qs = .FALSE.
 
    open(NEWUNIT=unit, STATUS='OLD', FILE=nml_file)
    read(unit, NML=params)
@@ -102,6 +108,15 @@ program thermo_scan_2d
    print *,'tau   :', tau
    print *,'H_B   :', H_B
    print *,'D_B   :', D_B
+
+   fl = flags_t(&
+      split=split, &
+      shift=shift, &
+      invert=invert, &
+      reorder=reorder, &
+      use_mesa=use_mesa, &
+      use_lpn=use_lpn, &
+      use_lpn_qs=use_lpn_qs)
 
    ! Solve for fingering-instability parameters
 
@@ -127,21 +142,23 @@ program thermo_scan_2d
       w_f = [((w_f_min*(n_w_f-j) + w_f_max*(j-1))/(n_w_f - 1), j=1,n_w_f)]
    endif
 
-   ! Loop over the grid, evaluating the maximal growth rate S
+   ! Allocate arrays
 
    allocate(S(n_k_z, n_w_f))
 
-   !$OMP PARALLEL DO PRIVATE(pa)
+   ! Loop over the grid, evaluating the maximal growth rate S
+
+   !$OMP PARALLEL DO PRIVATE(pa, i)
    do j = 1, n_w_f
       do i = 1, n_k_z
 
          ! Set up parameters
 
-         pa = params_t(R_0, Pr, tau, H_B, D_B, w_f(j), k_z(i))
+         pa = params_t(R_0, Pr, tau, H_B, D_B, w_f(j), k_z(i), N)
 
          ! Evaluate S
 
-         call eigen_max(N, pa, split, shift, invert, reorder, S(i,j))
+         call eigen_max(pa, fl, S(i,j))
 
       end do
    end do

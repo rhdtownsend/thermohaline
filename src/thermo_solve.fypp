@@ -5,6 +5,7 @@ program thermo_solve
    ! Uses
 
    use forum_m, split_ => split
+   use flags_m
    use params_m
    use finger_m
    use thermo_solve_m
@@ -36,10 +37,13 @@ program thermo_solve
    logical                  :: split
    logical                  :: reorder
    logical                  :: use_mesa
+   logical                  :: use_lpn
+   logical                  :: use_lpn_qs
    character(256)           :: out_file
    real(RD)                 :: lam_f
    real(RD)                 :: l_f
    real(RD), allocatable    :: k_z(:)
+   type(flags_t)            :: fl
    type(params_t)           :: pa
    integer                  :: i
    real(RD), allocatable    :: w_f(:)
@@ -50,7 +54,7 @@ program thermo_solve
       k_z_min, k_z_max, n_k_z, log_k_z, &
       rescale_k_z_min, rescale_k_z_max, &
       R_0, Pr, tau, H_B, D_B, &
-      N, C_2, split, reorder, use_mesa, &
+      N, C_2, split, reorder, use_mesa, use_lpn, use_lpn_qs, &
       out_file
 
    ! Read arguments
@@ -79,6 +83,8 @@ program thermo_solve
 
    split = .FALSE.
    use_mesa = .FALSE.
+   use_lpn = .FALSE.
+   use_lpn_qs = .FALSE.
    reorder = .FALSE.
 
    open(NEWUNIT=unit, STATUS='OLD', FILE=nml_file)
@@ -110,6 +116,13 @@ program thermo_solve
    allocate(w_f(n_k_z))
    allocate(sig(n_k_z))
 
+   fl = flags_t(&
+      split=split, &
+      reorder=reorder, &
+      use_mesa=use_mesa, &
+      use_lpn=use_lpn, &
+      use_lpn_qs=use_lpn_qs)
+
    !$OMP PARALLEL DO PRIVATE(pa)
    do i = 1, n_k_z
 
@@ -121,11 +134,11 @@ program thermo_solve
          k_z(i) = (k_z_min*(n_k_z-i) + k_z_max*(i-1))/(n_k_z - 1)
       endif
 
-      pa = params_t(R_0, Pr, tau, H_B, D_B, 0._RD, k_z(i))
+      pa = params_t(R_0, Pr, tau, H_B, D_B, 0._RD, k_z(i), N)
 
       ! Solve for w_f
 
-      call solve_w_f(N, pa, lam_f/C_2, split, reorder, use_mesa, w_f(i), sig(i))
+      call solve_w_f(pa, fl, lam_f/C_2, w_f(i), sig(i))
 
       print *,i,n_k_z,w_f(i),sig(i),lam_f/C_2
 

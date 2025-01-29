@@ -5,6 +5,7 @@ module thermo_m
    ! Uses
 
    use forum_m, split_ => split
+   use flags_m
    use params_m
    use matrix_m
    use linalg_m
@@ -23,26 +24,33 @@ module thermo_m
 
    public :: eigen_max
    public :: eigen_all
-   public :: eigen_2nd_order
 
 contains
 
-   subroutine eigen_max(N, pa, split, shift, invert, reorder, sig, use_mesa)
+   subroutine eigen_max(pa, fl, sig)
 
-      integer, intent(in)            :: N
-      type(params_t), intent(in)     :: pa
-      logical, intent(in)            :: split
-      logical, intent(in)            :: shift
-      logical, intent(in)            :: invert
-      logical, intent(in)            :: reorder
-      real(RD), intent(out)          :: sig
-      logical, intent(in), optional  :: use_mesa
+      type(params_t), intent(in) :: pa
+      type(flags_t), intent(in)  :: fl
+      real(RD), intent(out)      :: sig
 
-      complex(RD) :: sig_all(4*(2*N+1))
+      integer                  :: D_o
+      integer                  :: D_e
+      integer                  :: D
+      complex(RD), allocatable :: sig_all(:)
 
       ! Calculate the maximal value of the real part of all eigenvalues
 
-      call eigen_all(N, pa, split, shift, invert, reorder, sig_all, use_mesa)
+      if (fl%split) then
+         call get_matrix_dim(pa%N, fl, D_e, parity=.TRUE.)
+         call get_matrix_dim(pa%N, fl, D_o, parity=.FALSE.)
+         D = D_e + D_o
+      else
+         call get_matrix_dim(pa%N, fl, D)
+      end if
+
+      allocate(sig_all(D))
+
+      call eigen_all(pa, fl, sig_all)
 
       sig = MAXVAL(REAL(sig_all, RD))
 
@@ -50,172 +58,133 @@ contains
 
    !****
 
-   subroutine eigen_all(N, pa, split, shift, invert, reorder, sig, use_mesa)
+   subroutine eigen_all(pa, fl, sig)
 
-      integer, intent(in)            :: N
-      type(params_t), intent(in)     :: pa
-      logical, intent(in)            :: split
-      logical, intent(in)            :: shift
-      logical, intent(in)            :: invert
-      logical, intent(in)            :: reorder
-      complex(RD), intent(out)       :: sig(:)
-      logical, intent(in), optional  :: use_mesa
+      type(params_t), intent(in) :: pa
+      type(flags_t), intent(in)  :: fl
+      complex(RD), intent(out)   :: sig(:)
 
-      integer               :: s
-      real(RD), allocatable :: A(:,:)
-      real(RD)              :: sig_shift
-      integer, allocatable  :: ipiv(:)
-      real(RD), allocatable :: work(:)
-      integer               :: info
-      integer, allocatable  :: j(:)
-      integer               :: i
-      integer               :: k
-
-      @:CHECK_BOUNDS(SIZE(sig), 4*(2*N+1))
+      integer                  :: D_e
+      integer                  :: D_o
+      integer                  :: D
+      real(RD), allocatable    :: A(:,:)
+      real(RD)                 :: sig_shift
+      integer, allocatable     :: ipiv(:)
+      real(RD), allocatable    :: work(:)
+      integer                  :: info
+      complex(RD), allocatable :: sig_e(:)
+      complex(RD), allocatable :: sig_o(:)
 
       ! Calculate all eigenvalues of the A matrix
 
-      if (split) then
-
-         s = 2*(2*N+1)
-
-         allocate(A(s,s))
-
-         allocate(ipiv(s))
-         allocate(work(2*s))
+      if (fl%split) then
 
          ! Even parity
 
-         call eval_matrix(N, pa, A, parity=.TRUE., use_mesa=use_mesa)
+         call get_matrix_dim(pa%N, fl, D_e, .TRUE.)
 
-         if (shift) then
-            sig_shift = REAL(A(s,s), RD)
+         allocate(A(D_e,D_e))
+         allocate(ipiv(D_e))
+         allocate(work(2*D_e))
+
+         call eval_matrix(pa, fl, A, .TRUE.)
+
+         if (fl%shift) then
+            sig_shift = REAL(A(D_e,D_e), RD)
             A = A - sig_shift
          else
             sig_shift = 0._RD
          end if
 
-         if (invert) then
-            call DGETRF(s, s, A, s, ipiv, info)
-            call DGETRI(s, A, s, ipiv, work, SIZE(work), info)
+         if (fl%invert) then
+            call DGETRF(D_e, D_e, A, D_e, ipiv, info)
+            call DGETRI(D_e, A, D_e, ipiv, work, SIZE(work), info)
          end if
 
-         if (reorder) then
-            A = A(s:1:-1,s:1:-1)
-         end if
+         allocate(sig_e(D_e))
 
-         call solve_eigen(A, sig(1::2))
+         call solve_eigen(A, sig_e)
 
-         if (invert) then
-            sig(1::2) = 1._RD/sig(1::2) + sig_shift
+         if (fl%invert) then
+            sig_e = 1._RD/sig_e + sig_shift
          else
-            sig(1::2) = sig(1::2) + sig_shift
+            sig_e = sig_e + sig_shift
          end if
+
+         deallocate(ipiv)
+         deallocate(work)
+         deallocate(A)
 
          ! Odd parity
          
-         call eval_matrix(N, pa, A, parity=.FALSE., use_mesa=use_mesa)
+         call get_matrix_dim(pa%N, fl, D_o, .FALSE.)
 
-         if (shift) then
-            sig_shift = REAL(A(s,s), RD)
+         allocate(A(D_o,D_o))
+         allocate(ipiv(D_o))
+         allocate(work(2*D_o))
+
+         call eval_matrix(pa, fl, A, .FALSE.)
+
+         if (fl%shift) then
+            sig_shift = REAL(A(D_o,D_o), RD)
             A = A - sig_shift
          else
             sig_shift = 0._RD
          end if
 
-         if (invert) then
-            call DGETRF(s, s, A, s, ipiv, info)
-            call DGETRI(s, A, s, ipiv, work, SIZE(work), info)
+         if (fl%invert) then
+            call DGETRF(D_o, D_o, A, D_o, ipiv, info)
+            call DGETRI(D_o, A, D_o, ipiv, work, SIZE(work), info)
          end if
 
-         if (reorder) then
+         allocate(sig_o(D_o))
 
-            allocate(j(s))
+         call solve_eigen(A, sig_o)
 
-            i = 1
-
-            do k = 1, N
-
-               j(i) = 4*(N - k) + 3
-               j(i+1) = j(i) + 1
-               j(i+2) = j(i) + 2
-               j(i+3) = j(i) + 3
-
-               i = i + 4
-
-            end do
-
-            j(i) = 1
-            j(i+1) = j(i) + 1
-
-            A = A(j,j)
-
-         end if
-
-         call solve_eigen(A, sig(2::2))
-
-         if (invert) then
-            sig(2::2) = 1._RD/sig(2::2) + sig_shift
+         if (fl%invert) then
+            sig_o = 1._RD/sig_o + sig_shift
          else
-            sig(2::2) = sig(2::2) + sig_shift
+            sig_o = sig_o + sig_shift
          end if
+
+         ! Merge the two parities
+
+         D = D_e + D_o
+
+         @:CHECK_BOUNDS(SIZE(sig), D)
+
+         sig(1::2) = sig_e
+         sig(2::2) = sig_o
 
       else
 
          ! Full matrix
 
-         s = 4*(2*N+1)
+         call get_matrix_dim(pa%N, fl, D)
 
-         allocate(A(s,s))
+         allocate(A(D,D))
+         allocate(ipiv(D))
+         allocate(work(2*D))
 
-         allocate(ipiv(s))
-         allocate(work(2*s))
+         call eval_matrix(pa, fl, A)
 
-         call eval_matrix(N, pa, A, use_mesa=use_mesa)
-
-         if (shift) then
-            sig_shift = REAL(A(4*(2*N+1),4*(2*N+1)), RD)
+         if (fl%shift) then
+            sig_shift = REAL(A(D,D), RD)
             A = A - sig_shift
          else
             sig_shift = 0._RD
          end if
 
-         if (invert) then
-            call DGETRF(s, s, A, s, ipiv, info)
-            call DGETRI(s, A, s, ipiv, work, SIZE(work), info)
+         if (fl%invert) then
+            call DGETRF(D, D, A, D, ipiv, info)
+            call DGETRI(D, A, D, ipiv, work, SIZE(work), info)
          end if
 
-         if (reorder) then
-
-            allocate(j(s))
-
-            i = 1
-
-            do k = 1, 2*N+1
-
-               if (MOD(k, 2) == 0) then
-                  j(i) = 2*(4*N-k) + 5
-                  j(i+1) = j(i) + 1
-                  j(i+2) = j(i) + 2
-                  j(i+3) = j(i) + 3
-               else
-                  j(i) = 2*(k-1) + 1
-                  j(i+1) = j(i) + 1
-                  j(i+2) = j(i) + 2
-                  j(i+3) = j(i) + 3
-               endif
-
-               i = i + 4
-
-            end do
-
-            A = A(j,j)
-
-         end if
+         @:CHECK_BOUNDS(SIZE(sig), D)
 
          call solve_eigen(A, sig)
 
-         if (invert) then
+         if (fl%invert) then
             sig = 1._RD/sig + sig_shift
          else
             sig = sig + sig_shift
@@ -226,126 +195,5 @@ contains
       ! Finish
 
    end subroutine eigen_all
-
-   !****
-
-   subroutine eigen_2nd_order(N, pa, sig, partition, use_mesa)
-
-      integer, intent(in)           :: N
-      type(params_t), intent(in)    :: pa
-      complex(RD), intent(out)      :: sig(:)
-      logical, intent(in), optional :: partition
-      logical, intent(in), optional :: use_mesa
-
-      real(RD)       :: A(2*(2*N+1),2*(2*N+1))
-      type(params_t) :: pa_
-
-      ! Calculate second-order eigenvalues of the A matrix
-
-      pa_ = params_t(pa%R_0, pa%Pr, pa%tau, pa%H_B, pa%D_B, 1._RD, pa%k_z)
-
-      call eval_matrix(N, pa_, A, parity=.TRUE., use_mesa=use_mesa)
-      call pert_expand(N, pa%w_f, A, sig(1::2), partition=partition)
-
-      call eval_matrix(N, pa_, A, parity=.FALSE., use_mesa=use_mesa)
-      call pert_expand(N, pa%w_f, A, sig(2::2), partition=partition)
-
-   end subroutine eigen_2nd_order
-
-   !****
-
-   subroutine pert_expand(N, w_f, A, sig, partition)
-
-      integer, intent(in)           :: N
-      real(RD), intent(in)          :: w_f
-      real(RD), intent(in)          :: A(:,:)
-      complex(RD), intent(out)      :: sig(:)
-      logical, intent(in), optional :: partition
-
-      logical     :: partition_
-      real(RD)    :: A_0(2*(2*N+1),2*(2*N+1))
-      real(RD)    :: A_1(2*(2*N+1),2*(2*N+1))
-      integer     :: i
-      integer     :: k
-      integer     :: m
-      complex(RD) :: XL(2*(2*N+1),2*(2*N+1))
-      complex(RD) :: XR(2*(2*N+1),2*(2*N+1))
-      complex(RD) :: V(2*(2*N+1),2*(2*N+1))
-      complex(RD) :: dsig(2*(2*N+1))
-
-      @:CHECK_BOUNDS(SIZE(A, 1), 2*(2*N+1))
-      @:CHECK_BOUNDS(SIZE(A, 2), 2*(2*N+1))
-
-      @:CHECK_BOUNDS(SIZE(sig), 2*(2*N+1))
-
-      if (PRESENT(partition)) then
-         partition_ = partition
-      else
-         partition_ = .FALSE.
-      end if
-      
-      ! Isolate the zeroth and first-order parts of the matrices
-
-      A_0 = 0._RD
-
-      A_0(1:2,1:2) = A(1:2,1:2)
-
-      i = 3
-
-      do m = 1, N
-         A_0(i:i+3,i:i+3) = A(i:i+3,i:i+3)
-         i = i + 4
-      end do
-
-      A_1 = A - A_0
-
-      ! Calculate eigenvalues and eigenvectors of the zeroth-order matrix
-
-      if (partition_) then
-
-         XL = 0._RD
-         XR = 0._RD
-
-         ! Handle the first 2x2 block
-
-         call solve_eigen(A_0(1:2,1:2), sig(1:2), XL(1:2,1:2), XR(1:2,1:2))
-
-         ! Handle the other blocks
-
-         i = 3
-
-         do m = 1, N
-            call solve_eigen(A_0(i:i+3,i:i+3), sig(i:i+3), XL(i:i+3,i:i+3), XR(i:i+3,i:i+3))
-            i = i + 4
-         end do
-
-      else
-
-         call solve_eigen(A_0, sig, XL, XR)
-
-      end if
-
-      ! Calculate the overlap matrix
-
-      V = MATMUL(TRANSPOSE(CONJG(XL)), MATMUL(A_1, XR))
-
-      ! Evaluate the second-order corrections to w
-
-      dsig = 0._RD
-
-      row_loop: do i = 1, 2*(2*N+1)
-         col_loop: do k = 1, 2*(2*N+1)
-            if (i == k) then
-               cycle col_loop
-            end if
-            dsig(i) = dsig(i) + V(i,k)*V(k,i)/(sig(i) - sig(k))
-         end do col_loop
-      end do row_loop
-
-      ! Apply the corrections
-
-      sig = sig + w_f**2*dsig
-
-   end subroutine pert_expand
 
 end module thermo_m
